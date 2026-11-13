@@ -1,0 +1,29 @@
+# Kura with Docker Compose. Copy this file, adjust the marked lines, then run:
+#   docker compose up -d
+# Kura is then at http://<this machine>:8787. Details: https://github.com/Koxility/kura/wiki
+
+services:
+  kura:
+    image: ghcr.io/koxility/kura:latest   # or pin a version, e.g. ghcr.io/koxility/kura:1.1
+    container_name: kura
+    restart: unless-stopped
+
+    # Kura writes files as this user and group. Use the ids of the host user that should own
+    # the downloads (`id -u` and `id -g`).
+    user: "1000:1000"
+
+    ports:
+      - "8787:8787"   # host:container; change the left side to use another port
+
+    environment:
+      TZ: Europe/Berlin   # time zone for the daily Auto-Sync time
+      # File name of each episode while Settings → Downloads sets none:
+      # KURA_NAMING_TEMPLATE: "{title} {episodenumber} {language}"
+
+    volumes:
+      # Database, accounts and settings. Keep this folder in your backups.
+      - ./data:/data
+      # Your media. Inside Kura, create libraries with the path on the right side,
+      # e.g. /media or /media/anime. Add a line per extra folder:
+      - /path/to/media:/media
+      # - /mnt/nas/Serien:/media/serien
