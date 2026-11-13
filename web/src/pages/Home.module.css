@@ -1,0 +1,24 @@
+.title {
+  margin: 24px 0 28px;
+  text-align: center;
+  font-size: clamp(48px, 9vw, 88px);
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+
+.search {
+  display: flex;
+  gap: 8px;
+  max-width: 640px;
+  margin: 20px auto 8px;
+}
+
+.genre {
+  margin-top: 28px;
+}
+
+@media (max-width: 720px) {
+  .search {
+    flex-wrap: wrap;
+  }
+}

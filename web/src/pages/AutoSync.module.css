@@ -1,0 +1,10 @@
+/* Sync now sits at the top right, its result to its left. */
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  margin-top: 24px;
+  font-size: var(--size-s);
+}

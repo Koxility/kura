@@ -1,0 +1,23 @@
+[package]
+name = "kura-hosters"
+description = "Extractors that turn a hoster page into a direct stream URL"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kura-domain.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+kura-sites.workspace = true
+tokio.workspace = true

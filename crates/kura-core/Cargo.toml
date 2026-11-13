@@ -1,0 +1,33 @@
+[package]
+name = "kura-core"
+description = "Search, queue and download workers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+
+[dependencies]
+kura-domain.workspace = true
+kura-download.workspace = true
+kura-hosters.workspace = true
+kura-sites.workspace = true
+kura-store.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing.workspace = true
+argon2 = "0.6.0"
+sha2 = "0.11.1"
+getrandom = "0.4.3"
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["time"] }

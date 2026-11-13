@@ -1,0 +1,50 @@
+.tree,
+.group {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tree {
+  max-width: 860px;
+  margin: 32px auto 0;
+  border-top: 1px solid var(--line);
+}
+
+/* A full-width row: a button for folders, plain for files. */
+.entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font: 400 var(--size-m) / 1.5 var(--font);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+button.entry {
+  cursor: pointer;
+  transition: background var(--fast);
+}
+
+button.entry:hover {
+  background: var(--hover);
+}
+
+.root {
+  padding-top: 14px;
+  padding-bottom: 14px;
+  font-weight: 500;
+}
+
+.chevron {
+  flex: none;
+  width: 12px;
+  color: var(--text-3);
+  font-size: 11px;
+}

@@ -1,0 +1,41 @@
+.group {
+  list-style: none;
+}
+
+.toggle {
+  flex: none;
+  width: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.title {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: 500 var(--size-m) / 1.5 var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+
+.summary {
+  margin: 2px 0 0;
+  font-size: var(--size-s);
+}
+
+/* The episodes of an opened title, indented under it. */
+.episodes {
+  margin: 0;
+  padding: 0 0 0 40px;
+  list-style: none;
+  font-size: var(--size-s);
+}
+
+.episodes > li {
+  padding: 8px 0;
+}

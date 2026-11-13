@@ -1,0 +1,11 @@
+.page {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 16px;
+}
+
+.form {
+  width: 100%;
+  max-width: 360px;
+}
