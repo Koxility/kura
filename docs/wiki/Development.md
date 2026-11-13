@@ -47,7 +47,7 @@ cargo test -p kura-sites -p kura-hosters -- --ignored
    ```
 
 4. The *Docker image* workflow builds `ghcr.io/koxility/kura` for amd64 and arm64 and tags it `1.2.0`, `1.2`, `1` and `latest`.
-5. Create the GitHub release from the changelog. Running Kura instances show the Update label within a day.
+5. Create the GitHub release from the changelog. Running Kura 1.2.1 and later show the Update label within an hour.
 
 ## Adding a site or provider
 

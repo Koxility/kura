@@ -1,6 +1,6 @@
 # Updating
 
-When a newer release exists, the top bar shows a small blue **Update** label next to the version number. It links to the release notes. Kura asks GitHub about this at start and then once a day; nothing else is sent.
+When a newer release exists, the top bar shows a small blue **Update** label next to the version number. It links to the release notes. Kura asks GitHub about this at start and then every hour (after a failed check, again within 5 minutes); nothing else is sent. Kura 1.1 and 1.2.0 only checked once a day: if one of them was already running when a release came out, restart it to see the label at once.
 
 ## Docker Compose
 

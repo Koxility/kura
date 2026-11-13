@@ -4,6 +4,12 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-13
+
+### Fixed
+
+- The Update label appears within an hour of a new release. Kura asked GitHub only once a day, so an instance that was already running when a release came out showed nothing until the next day; a failed check also waited a full day. Now Kura asks every hour and retries a failed check after 5 minutes.
+
 ## [1.2.0] - 2026-11-13
 
 ### Library
@@ -97,7 +103,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/Koxility/kura/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Koxility/kura/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Koxility/kura/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Koxility/kura/releases/tag/v1.0.0
