@@ -284,8 +284,9 @@ async fn falls_back_to_the_next_hoster_and_then_the_next_language() {
     assert_eq!(s.queue(first(), Choices::default()).await.unwrap(), 1);
     let jobs = states(&s.core, &[JobState::Done]).await;
 
-    let target =
-        s.path("main/Series/Lantern Road [imdbid-tt0388629]/Season 01/Lantern Road - S01E01.mkv");
+    let target = s.path(
+        "main/Series/Lantern Road [imdbid-tt0388629]/Season 01/Lantern Road S01E001 German Sub.mkv",
+    );
     assert_eq!(jobs[0].path.as_deref(), target.to_str());
     assert_eq!(
         *s.downloads.lock().unwrap(),
@@ -644,14 +645,37 @@ fn titles_become_safe_folder_names() {
     assert_eq!(safe_name("../.."), None);
     assert_eq!(safe_name("\u{0}\n"), None);
 
-    let episode = EpisodeId {
-        site: SiteId::AniWorld,
-        slug: "some-slug".to_owned(),
-        season: 0,
-        number: 12,
+    let job = |imdb_id: Option<&str>| Job {
+        id: 1,
+        episode: EpisodeId {
+            site: SiteId::AniWorld,
+            slug: "some-slug".to_owned(),
+            season: 0,
+            number: 12,
+        },
+        series_title: "../..".to_owned(),
+        state: JobState::Running,
+        progress: 0.0,
+        error: None,
+        path: None,
+        language: None,
+        hoster: None,
+        dir: "dl".to_owned(),
+        hidden: false,
+        queued_at: 0,
+        imdb_id: imdb_id.map(str::to_owned),
     };
-    let path = |imdb| target_path(Path::new("dl"), "../..", &episode, OutputFormat::Mp4, imdb);
-    let file = "Season 00/some-slug - S00E12.mp4";
+    let path = |imdb| {
+        let template = "{title} {episodenumber}";
+        target_path(
+            Path::new("dl"),
+            template,
+            &job(imdb),
+            Language::GermanDub,
+            OutputFormat::Mp4,
+        )
+    };
+    let file = "Season 00/some-slug S00E012.mp4";
     let id = Path::new("dl/Series/some-slug [imdbid-tt0388629]").join(file);
     assert_eq!(path(Some("tt0388629")), id);
     let none = Path::new("dl/Series/some-slug [imdbid-none]").join(file);
@@ -861,4 +885,28 @@ async fn the_library_view_stays_inside_its_folders() {
         Err(CoreError::Invalid(_))
     ));
     assert!(matches!(s.core.browse(7, ""), Err(CoreError::Invalid(_))));
+}
+
+#[tokio::test]
+async fn a_custom_naming_template_names_the_file() {
+    let s = setup(vec![link(Language::GermanDub, "voe", "https://voe/x")], 1);
+    let settings = Settings {
+        naming_template: Some("{episodenumber} - {title} [{language}]".to_owned()),
+        ..s.core.settings().unwrap()
+    };
+    s.core.save_settings(&settings).unwrap();
+    let broken = Settings {
+        naming_template: Some("{title}".to_owned()),
+        ..settings
+    };
+    assert!(matches!(
+        s.core.save_settings(&broken),
+        Err(CoreError::Invalid(_))
+    ));
+
+    s.queue(first(), Choices::default()).await.unwrap();
+    let jobs = states(&s.core, &[JobState::Done]).await;
+    let file = PathBuf::from(jobs[0].path.as_deref().unwrap());
+    let name = file.file_name().unwrap().to_string_lossy().into_owned();
+    assert_eq!(name, "S01E001 - Lantern Road [German Dub].mkv");
 }

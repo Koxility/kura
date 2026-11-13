@@ -74,6 +74,10 @@ export interface Settings {
   languages: Language[];
   hosters: string[];
   output_format: "mkv" | "mp4";
+  /** `null` uses `naming_template_default`. */
+  naming_template: string | null;
+  /** Sent by the server: what applies while `naming_template` is null. Ignored on save. */
+  naming_template_default?: string;
   /** The first is the main library. */
   libraries: Library[];
   disabled_sites: Site[];
@@ -85,7 +89,8 @@ export interface Status {
   user: User | null;
   version: string;
   repository: string;
-  update_available: boolean;
+  /** A newer release on GitHub, like `1.2.0`; absent while this one is the newest. */
+  latest_version: string | null;
   needs_library: boolean;
   suggested_library_path: string | null;
   /** Sites that are switched on. */
@@ -165,7 +170,12 @@ export async function api<T>(path: string, method = "GET", body?: unknown): Prom
 }
 
 export const jobsQuery = { queryKey: ["queue"], queryFn: () => api<Job[]>("/queue") };
-export const statusQuery = { queryKey: ["status"], queryFn: () => api<Status>("/status") };
+export const statusQuery = {
+  queryKey: ["status"],
+  queryFn: () => api<Status>("/status"),
+  // Also picks up a new release while the page stays open.
+  refetchInterval: 30 * 60_000,
+};
 export const requestsQuery = {
   queryKey: ["requests"],
   queryFn: () => api<Request[]>("/requests"),

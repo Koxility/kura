@@ -218,6 +218,9 @@ pub struct Settings {
     /// Hoster names, tried in this order within a language.
     pub hosters: Vec<String>,
     pub output_format: OutputFormat,
+    /// File name of an episode, e.g. `{title} {episodenumber} {language}`. `None` uses
+    /// `KURA_NAMING_TEMPLATE` or the built-in template.
+    pub naming_template: Option<String>,
     /// Where downloads go. The first is the main library, used when the user picks none and
     /// no library is the default for the site. Empty until the admin sets one up.
     pub libraries: Vec<Library>,
@@ -291,6 +294,7 @@ impl Default for Settings {
             // Only hosters Kura can extract from; others would just be skipped.
             hosters: ["voe", "vidmoly"].map(String::from).to_vec(),
             output_format: OutputFormat::Mkv,
+            naming_template: None,
             libraries: Vec::new(),
             disabled_sites: Vec::new(),
             auto_sync: AutoSync::default(),

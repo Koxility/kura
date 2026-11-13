@@ -62,7 +62,7 @@ async fn setup_login_and_logout() {
         (200, &json!(true), &Value::Null)
     );
     assert_eq!(fresh["version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(fresh["update_available"], false);
+    assert_eq!(fresh["latest_version"], Value::Null);
     assert_eq!(fresh["needs_library"], true);
     assert!(
         fresh["suggested_library_path"]
@@ -105,6 +105,11 @@ async fn settings_and_users_are_for_admins() {
 
     let (_, mut settings) = server.get("/settings", &admin).await;
     assert_eq!(settings["parallel"], 4);
+    assert_eq!(settings["naming_template"], Value::Null);
+    assert_eq!(
+        settings["naming_template_default"],
+        kura_core::DEFAULT_TEMPLATE
+    );
     // Nothing can be saved without a library.
     let refused = server.call(Method::PUT, "/settings", &admin, settings.clone());
     assert_eq!(refused.await.0, 400);

@@ -36,21 +36,24 @@ impl Core {
         Ok(address.to_string())
     }
 
-    /// Whether GitHub lists a release newer than this build. Answers from memory at once and
-    /// refreshes in the background, so no page waits for GitHub.
-    pub fn update_available(self: &Arc<Self>) -> bool {
+    /// The newest release on GitHub, without the leading `v`, when it is newer than this
+    /// build. Answers from memory at once and refreshes in the background at most once a day,
+    /// so no page waits for GitHub.
+    pub fn newer_release(self: &Arc<Self>) -> Option<String> {
         let mut update = self.update.lock().unwrap_or_else(PoisonError::into_inner);
-        let (stale, known) = match *update {
-            Some((checked, known)) => (checked.elapsed() > UPDATE_CHECK_EVERY, known),
-            None => (true, false),
+        let (stale, known) = match &*update {
+            Some((checked, known)) => (checked.elapsed() > UPDATE_CHECK_EVERY, known.clone()),
+            None => (true, None),
         };
         if stale {
             // Marked as checked first, so a burst of page loads starts one request.
-            *update = Some((Instant::now(), known));
+            *update = Some((Instant::now(), known.clone()));
             let core = self.clone();
             tokio::spawn(async move {
-                let latest = latest_release().await;
-                let newer = latest.is_some_and(|tag| is_newer(&tag, env!("CARGO_PKG_VERSION")));
+                let newer = latest_release()
+                    .await
+                    .filter(|tag| is_newer(tag, env!("CARGO_PKG_VERSION")))
+                    .map(|tag| tag.trim_start_matches('v').to_owned());
                 let mut update = core.update.lock().unwrap_or_else(PoisonError::into_inner);
                 *update = Some((Instant::now(), newer));
             });

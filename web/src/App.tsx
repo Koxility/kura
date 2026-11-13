@@ -68,15 +68,15 @@ function Shell({ status }: { status: Status }) {
           <a className={styles.version} href={status.repository} target="_blank" rel="noreferrer">
             v{status.version}
           </a>
-          {status.update_available && (
+          {status.latest_version && (
             <a
-              className={ui.badge}
-              href={`${status.repository}/releases/latest`}
+              className={styles.update}
+              href={`${status.repository}/releases/tag/v${status.latest_version}`}
               target="_blank"
               rel="noreferrer"
-              title="A newer release is available"
+              title={`Kura ${status.latest_version} is available`}
             >
-              New
+              Update
             </a>
           )}
         </div>

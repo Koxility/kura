@@ -180,7 +180,7 @@ async fn status(State(core): App, headers: HeaderMap) -> ApiResult<Json<Value>> 
         "user": user,
         "version": env!("CARGO_PKG_VERSION"),
         "repository": format!("https://github.com/{REPOSITORY}"),
-        "update_available": core.update_available(),
+        "latest_version": core.newer_release(),
         "needs_library": core.settings()?.libraries.is_empty(),
         "sites": core.enabled_sites()?,
         // Names only, for the library choice on a title's page; paths stay with admins.
@@ -192,9 +192,10 @@ async fn status(State(core): App, headers: HeaderMap) -> ApiResult<Json<Value>> 
             _ => Vec::new(),
         },
         // Offered by the library setup; the folder the server runs in is a sensible start.
-        "suggested_library_path": std::env::current_dir()
-            .map(|dir| dir.join("downloads").to_string_lossy().into_owned())
-            .ok(),
+        "suggested_library_path": std::env::var("KURA_LIBRARY_DIR").ok().or_else(|| {
+            let here = std::env::current_dir().ok()?;
+            Some(here.join("downloads").to_string_lossy().into_owned())
+        }),
     })))
 }
 
@@ -456,8 +457,12 @@ async fn events(
 
 // Settings
 
-async fn settings(State(core): App, _: Admin) -> ApiResult<Json<Settings>> {
-    Ok(Json(core.settings()?))
+/// The settings, plus the naming template that applies while they name none.
+async fn settings(State(core): App, _: Admin) -> ApiResult<Json<Value>> {
+    let mut settings = serde_json::to_value(core.settings()?)
+        .map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))?;
+    settings["naming_template_default"] = json!(kura_core::default_template());
+    Ok(Json(settings))
 }
 
 async fn save_settings(
