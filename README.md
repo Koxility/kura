@@ -4,10 +4,10 @@
 
 **Download anime and series from AniWorld and SerienStream. Your library stays Jellyfin-ready.**
 
-[![Latest release](https://img.shields.io/github/v/release/Koxility/kura?label=release&color=3ecf8e)](https://github.com/Koxility/kura/releases/latest)
-[![License: MIT](https://img.shields.io/badge/license-MIT-f5f5f5)](LICENSE)
-![Platform: Linux](https://img.shields.io/badge/platform-Linux-a1a1a1)
-![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-a1a1a1)
+[![Latest release](https://img.shields.io/github/v/release/Koxility/kura?label=release&color=3b82f6)](https://github.com/Koxility/musubi/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![Platform: Linux](https://img.shields.io/badge/platform-Linux%20x86__green)
+![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-green)
 
 [Features](#features) · [Installation](#installation) · [Getting started](#getting-started) · [Configuration](#configuration) · [API](#api) · [Documentation](#documentation)
 
