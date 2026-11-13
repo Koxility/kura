@@ -166,3 +166,13 @@
     grid-template-columns: 1fr;
   }
 }
+
+.preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 10px 0 0;
+  font-size: var(--size-s);
+  overflow-wrap: anywhere;
+}

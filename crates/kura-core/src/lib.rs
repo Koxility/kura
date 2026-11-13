@@ -4,6 +4,7 @@
 
 mod auth;
 mod library;
+mod naming;
 mod net;
 mod requests;
 mod sync;
@@ -27,6 +28,7 @@ pub use kura_sites::SiteError;
 use kura_sites::{AniWorld, SerienStream, Site};
 use kura_store::{NewJob, Store, StoreError};
 pub use library::{Entry, LibraryRoot};
+pub use naming::{DEFAULT_TEMPLATE, default_template};
 pub use net::REPOSITORY;
 use serde::Serialize;
 pub use sync::{SyncStatus, TrackedTitle};
@@ -152,7 +154,7 @@ pub struct Core {
     /// Wakes the Auto-Sync loop when its settings changed.
     sync_wake: Notify,
     /// When GitHub was last asked for a newer release, and the answer.
-    update: Mutex<Option<(Instant, bool)>>,
+    update: Mutex<Option<(Instant, Option<String>)>>,
 }
 
 /// When a site's full list was fetched, and the list.
@@ -519,13 +521,9 @@ impl Core {
         let links = site.links(&job.episode).await;
         let links = links.map_err(|err| err.to_string())?;
         let format = settings.output_format;
-        let target = target_path(
-            Path::new(&job.dir),
-            &job.series_title,
-            &job.episode,
-            format,
-            job.imdb_id.as_deref(),
-        );
+        let template = naming::effective_template(&settings);
+        // The name carries the language, which is only known once a link is picked.
+        let target = |language| target_path(Path::new(&job.dir), &template, job, language, format);
 
         let languages = job
             .language
@@ -544,6 +542,7 @@ impl Core {
                 };
                 let wanted = |link: &&HosterLink| link.language == language && link.hoster == *name;
                 for link in links.iter().filter(wanted) {
+                    let target = target(language);
                     let fetched = self.fetch(job.id, hoster.as_ref(), link, &target, format);
                     match fetched.await {
                         Ok(()) => return Ok(target),
@@ -621,6 +620,9 @@ fn check_settings(settings: &Settings) -> Result<()> {
     if settings.languages.is_empty() || settings.hosters.is_empty() {
         return invalid("at least one language and one provider are needed");
     }
+    if let Some(template) = &settings.naming_template {
+        naming::check_template(template)?;
+    }
 
     let mut names = Vec::new();
     let mut defaults = Vec::new();
@@ -659,34 +661,48 @@ pub(crate) fn parse_time(at: &str) -> Option<(u32, u32)> {
     (hour < 24 && minute < 60).then_some((hour, minute))
 }
 
-/// `<dir>/Series/<Title> [imdbid-tt0388629]/Season 01/<Title> - S01E01.mkv`, the layout
-/// Jellyfin reads; season 0 is specials. Downloads from before IMDb IDs keep the folder
-/// without one, so a series is not split across two folders.
+/// `<dir>/Series/<Title> [imdbid-tt0388629]/Season 01/<name from the template>.<ext>`, the
+/// layout Jellyfin reads; season 0 is specials. Downloads from before IMDb IDs keep the
+/// folder without one, so a series is not split across two folders.
 fn target_path(
     dir: &Path,
-    title: &str,
-    episode: &EpisodeId,
+    template: &str,
+    job: &Job,
+    language: Language,
     format: OutputFormat,
-    imdb_id: Option<&str>,
 ) -> PathBuf {
+    let episode = &job.episode;
     // The slug is already limited to safe characters.
-    let name = safe_name(title).unwrap_or_else(|| episode.slug.clone());
-    let (season, number) = (episode.season, episode.number);
-    let file = format!("{name} - S{season:02}E{number:02}.{}", format.as_str());
+    let name = safe_name(&job.series_title).unwrap_or_else(|| episode.slug.clone());
     // A stored ID was checked on the way in; anything else would not reach the path.
-    let folder = match imdb_id.filter(|id| kura_domain::is_imdb_id(id)) {
+    let imdb_id = job
+        .imdb_id
+        .as_deref()
+        .filter(|id| kura_domain::is_imdb_id(id));
+    let parts = naming::NameParts {
+        title: &name,
+        season: episode.season,
+        episode: episode.number,
+        language,
+        imdb_id,
+    };
+    // A checked template always leaves a name; the fallback only guards against surprises.
+    let file = naming::render(template, &parts)
+        .or_else(|| naming::render(naming::DEFAULT_TEMPLATE, &parts))
+        .unwrap_or_else(|| format!("S{:02}E{:03}", episode.season, episode.number));
+    let folder = match imdb_id {
         Some(id) => format!("{name} [imdbid-{id}]"),
         None => name,
     };
     dir.join("Series")
         .join(folder)
-        .join(format!("Season {season:02}"))
-        .join(file)
+        .join(format!("Season {:02}", episode.season))
+        .join(format!("{file}.{}", format.as_str()))
 }
 
 /// A title as a folder name: nothing that could leave the folder or that a file system
 /// refuses. `None` when nothing usable is left.
-fn safe_name(title: &str) -> Option<String> {
+pub(crate) fn safe_name(title: &str) -> Option<String> {
     let cleaned: String = title
         .chars()
         .map(|c| match c {

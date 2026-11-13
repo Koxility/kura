@@ -141,9 +141,51 @@ function SettingsForm({
 
 type SectionProps = { draft: Settings; change: (part: Partial<Settings>) => void };
 
+/** The file name the server would give episode 1 of One Piece, for the preview. */
+function previewName(template: string, format: string) {
+  const name = template
+    .replaceAll("{title}", "One Piece")
+    .replaceAll("{episodenumber}", "S01E001")
+    .replaceAll("{language}", "German Dub")
+    .replaceAll("{season}", "01")
+    .replaceAll("{episode}", "001")
+    .replaceAll("{imdbid}", "tt0388629")
+    .replace(/[/\\:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return `${name}.${format}`;
+}
+
 function Downloads({ draft, change }: SectionProps) {
+  const fallback = draft.naming_template_default ?? "{title} {episodenumber} {language}";
+  const template = draft.naming_template ?? fallback;
+
   return (
     <>
+      <label className={ui.field}>
+        Naming template
+        <input
+          className={`${ui.input} ${ui.mono}`}
+          value={draft.naming_template ?? ""}
+          placeholder={fallback}
+          onChange={(event) => change({ naming_template: event.target.value || null })}
+          spellCheck={false}
+        />
+      </label>
+      <p className={styles.hint}>
+        Variables: {"{title}"}, {"{episodenumber}"} (S01E001), {"{language}"} (German Dub),{" "}
+        {"{season}"} (01), {"{episode}"} (001), {"{imdbid}"}. Needs {"{episodenumber}"}, or{" "}
+        {"{season}"} and {"{episode}"}. Empty uses the default shown above.
+      </p>
+      <p className={styles.preview}>
+        <span className={styles.faint}>Example:</span>{" "}
+        <span className={ui.mono}>{previewName(template, draft.output_format)}</span>
+        {draft.naming_template !== null && (
+          <button type="button" className={ui.ghost} onClick={() => change({ naming_template: null })}>
+            Reset to default
+          </button>
+        )}
+      </p>
       <label className={ui.field}>
         Output format
         <select
