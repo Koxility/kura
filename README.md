@@ -1,16 +1,42 @@
+<div align="center">
+
 # Kura
 
-Kura (蔵, "storehouse") is a self-hosted web app that downloads series and anime from AniWorld and SerienStream into a clean, Jellyfin-ready library on your own disk.
+**Download anime and series from AniWorld and SerienStream. Your library stays Jellyfin-ready.**
+
+[![Latest release](https://img.shields.io/github/v/release/Koxility/kura?label=release&color=3ecf8e)](https://github.com/Koxility/kura/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-f5f5f5)](LICENSE)
+![Platform: Linux](https://img.shields.io/badge/platform-Linux-a1a1a1)
+![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-a1a1a1)
+
+[Features](#features) · [Installation](#installation) · [Getting started](#getting-started) · [Configuration](#configuration) · [API](#api) · [Documentation](#documentation)
+
+</div>
+
+Kura (蔵, "storehouse") is a self-hosted web app. You browse AniWorld and SerienStream in one clean interface, pick what you want, and Kura downloads it into a library on your own disk, laid out the way Jellyfin reads it.
 
 ## Features
 
-- **Browse** AniWorld and SerienStream from one interface: search, genres, new and popular titles, a random pick.
-- **Download** single episodes, whole seasons or entire series, several at a time, with live progress.
-- **Choose language and provider** per download, or let Kura fall back through your preferred order (German dub, German sub, English sub; VOE, Vidmoly).
-- **Libraries**: named folders with a default per site, laid out the way Jellyfin expects, IMDb ID included.
-- **Auto-Sync**: checks downloaded series for new episodes on a schedule.
-- **Users and requests**: normal users request titles, admins accept or reject them.
-- **JSON API** for other tools, the same one the web app uses.
+**Browse** — both sites in one place.
+
+- A home page per site with search, genres that keep loading as you scroll, new and popular titles, and a random pick.
+- A page per title with its seasons as a tree: open a season, tick episodes or whole seasons, download the selection or everything.
+
+**Download** — reliable, several at a time.
+
+- Language and provider per download, or Kura's fallback through your preferred order (German dub, German sub, English sub; VOE, Vidmoly).
+- A queue with live progress, one entry per title ("2 of 4 episodes downloaded"), filters, search and sort.
+- mkv or mp4, copied by ffmpeg without re-encoding.
+
+**Keep** — a tidy library that stays current.
+
+- Libraries: named folders with a default per site, with the IMDb ID in every series folder.
+- Auto-Sync checks downloaded series for new episodes on a schedule, or right now with one click.
+
+**Share** — one server for the whole household.
+
+- Local accounts. Normal users request titles; admins accept or reject them, and accepted requests are queued.
+- A JSON API for other tools, the same one the web app uses.
 
 ## Requirements
 
@@ -18,27 +44,45 @@ Kura (蔵, "storehouse") is a self-hosted web app that downloads series and anim
 - [ffmpeg](https://ffmpeg.org) and `ffprobe` on the `PATH`
 - To build: Rust 1.88 or newer and [Bun](https://bun.sh)
 
-A Docker image is planned; until then Kura runs from source.
+## Installation
 
-## Running Kura
+A Docker image is planned. Until then Kura runs from source:
 
 ```bash
 git clone https://github.com/Koxility/kura.git
+```
+
+```bash
 cd kura/web && bun install && bun run build && cd ..
+```
+
+```bash
 cargo build --release
+```
+
+```bash
 ./target/release/kura
 ```
 
-Open `http://127.0.0.1:8787`. On first start Kura asks for an admin account, then for a first library: a folder downloads go to.
+The result is a single binary with the web app built in.
 
-| Variable | Default | Meaning |
+## Getting started
+
+1. Open `http://127.0.0.1:8787` and create the admin account.
+2. Set up the first library: a name and a folder on the server. Kura creates the folder if it does not exist.
+3. Search for a title on Home, open it, pick episodes or seasons and press Download.
+4. Add more users under Settings → Users. They can browse and request; you decide in Request.
+
+## Using Kura
+
+| Page | Admin | User |
 |---|---|---|
-| `KURA_LISTEN` | `127.0.0.1:8787` | Address and port. Use `0.0.0.0:8787` to reach Kura from other machines. |
-| `KURA_DATA` | `data` | Folder for the database. |
-
-Everything else is set in the web app under Settings and stored in the database.
-
-## Folder layout
+| Home | Browse, search, download | Browse, search, request |
+| Library | The libraries as a folder tree | – |
+| Auto-Sync | Tracked titles, Sync now, exclusions | – |
+| Queue | Watch, cancel, retry, clear | Watch |
+| Request | Accept or reject | Own requests and their status |
+| Settings | Downloads, libraries, sites, Auto-Sync, users, administration | – |
 
 Inside every library Kura writes
 
@@ -51,21 +95,20 @@ Series/
 
 Point a Jellyfin "Shows" library at the `Series` folder. The IMDb ID comes from the site; when the site has none, Kura asks for it before downloading, and `[imdbid-none]` is used if you skip.
 
-## Users and requests
+## Configuration
 
-| | Admin | User |
+Two environment variables set where Kura runs:
+
+| Variable | Default | Meaning |
 |---|---|---|
-| Browse and search | yes | yes |
-| Queue | view and manage | view |
-| Download | yes | request only |
-| Requests | accept or reject | own requests |
-| Library, Auto-Sync, Settings | yes | no |
+| `KURA_LISTEN` | `127.0.0.1:8787` | Address and port. Use `0.0.0.0:8787` to reach Kura from other machines. |
+| `KURA_DATA` | `data` | Folder for the database. |
 
-Accepted requests are queued into the site's default library.
+Everything else is set in the web app under Settings and stored in the database, so it survives restarts. Settings → Administration exports and imports the configuration as one file; accounts and passwords are not part of it.
 
 ## API
 
-The web app talks to a JSON API under `/api/v1`, authenticated with the session cookie from `POST /api/v1/login`. The main endpoints:
+The web app talks to a JSON API under `/api/v1`, authenticated with the session cookie from `POST /api/v1/login`.
 
 | Endpoint | Purpose |
 |---|---|
@@ -76,38 +119,43 @@ The web app talks to a JSON API under `/api/v1`, authenticated with the session 
 | `GET /requests`, `POST /requests` | Requests |
 | `GET /events` | Live progress as Server-Sent Events |
 
-`crates/kura/src/api.rs` lists every route.
+[`crates/kura/src/api.rs`](crates/kura/src/api.rs) lists every route.
 
-## Development
+## Documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how sites, providers, the downloader and the server fit together.
+- [CHANGELOG.md](CHANGELOG.md): what changed in each release.
+
+## Contributing
+
+Bug reports and ideas are welcome in the [issue tracker](https://github.com/Koxility/kura/issues). For code changes, `bun run dev` in `web/` serves the web app with hot reload and passes `/api` on to a server started with `cargo run -p kura`. These three have to pass before a pull request:
+
+```bash
+cargo fmt --all --check
+```
+
+```bash
+cargo clippy --workspace --all-targets -- -D warnings
+```
 
 ```bash
 cargo test --workspace
 ```
 
-```bash
-cd web && bun run dev
-```
-
-`bun run dev` serves the web app with hot reload and passes `/api` on to a server started with `cargo run -p kura`. How the crates fit together is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-Tests that talk to the real sites and hosters are skipped by default:
+Tests that talk to the real sites and providers are skipped by default:
 
 ```bash
 cargo test -p kura-sites -p kura-hosters -- --ignored
 ```
 
-Before every commit:
-
-```bash
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-```
-
-## Legal
-
-Kura hosts and distributes no content. Whether downloading from the supported sites is allowed depends on where you live and on the content; you are responsible for how you use it.
-
 ## License
 
-[MIT](LICENSE)
+Kura is free software, licensed under the [MIT License](LICENSE).
+
+## Legal disclaimer
+
+Kura is a client-side tool. It reads publicly reachable pages of the sites you choose and passes the video links found there to ffmpeg, which saves them to storage you control. It does not host, provide, index or distribute any media, and the project runs no servers of its own.
+
+You are responsible for how you use it, for what you download, and for following the laws and terms of service that apply where you live. In many countries, including Germany, downloading copyrighted works from sources that are not licensed to offer them is not allowed. The project is provided "as is", without warranty of any kind. Its maintainers are not responsible for third-party content, external links, or the availability, accuracy, legality or reliability of outside services.
+
+Kura is an independent project. It is not affiliated with, endorsed by or sponsored by AniWorld, SerienStream, any video provider, IMDb or Jellyfin; their names and trademarks belong to their respective owners. Questions about content hosted by another service should be directed to that service.
