@@ -45,7 +45,7 @@ Admins queue downloads directly; normal users send requests, which an admin acce
 
 ## Folder names
 
-`target_path` in `kura-core` builds `<library>/Series/<Title> [imdbid-<id>]/Season XX/`. Each job stores its IMDb ID, so retries and Auto-Sync keep using the same folder; jobs from before IMDb IDs have none and keep the folder without one.
+`target_path` in `kura-core` builds `<library>/Series/<Title> [imdbid-<id>]/Season XX/`; the file name comes from the naming template (`naming.rs`), rendered per download attempt because it carries the language actually used. Each job stores its IMDb ID, so retries and Auto-Sync keep using the same folder; jobs from before IMDb IDs have none and keep the folder without one.
 
 ## Storage
 
