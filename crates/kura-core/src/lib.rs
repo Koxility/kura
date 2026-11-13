@@ -154,7 +154,7 @@ pub struct Core {
     sync: Mutex<sync::SyncState>,
     /// Wakes the Auto-Sync loop when its settings changed.
     sync_wake: Notify,
-    /// When GitHub was last asked for a newer release, and the answer.
+    /// When GitHub is asked next, and the newer release known so far.
     update: Mutex<Option<(Instant, Option<String>)>>,
     /// Series folders found in the libraries, kept for a moment.
     scan: Mutex<Option<downloaded::Scan>>,
