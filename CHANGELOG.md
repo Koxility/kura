@@ -4,6 +4,31 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-13
+
+### Docker
+
+- Kura is published as a Docker image, `ghcr.io/koxility/kura`, for amd64 and arm64. Every release is built and published automatically and tagged with its version, its minor and major series, and `latest`.
+- A ready-to-use `docker-compose.yaml` with volumes for the database and your media.
+- The image checks its own health, stops cleanly on `docker stop`, and runs as an unprivileged user.
+- `kura --version`, `kura --help` and `kura healthcheck`; unknown arguments print the help instead of starting the server.
+- `KURA_LIBRARY_DIR` sets the folder the library setup suggests (`/media` in the image).
+
+### Naming template
+
+- New setting under Settings → Downloads: the file name of every episode, from `{title}`, `{episodenumber}`, `{language}`, `{season}`, `{episode}` and `{imdbid}`, with a live preview. `KURA_NAMING_TEMPLATE` sets it for the whole installation while the setting is empty.
+- Episode numbers have three digits: `S01E001`, `S10E120`.
+- The default is `{title} {episodenumber} {language}`, e.g. `One Piece S01E001 German Dub.mkv`. Files downloaded before keep their names.
+
+### Updates
+
+- A small blue **Update** label next to the version in the top bar when a newer release is out, linking to it. Kura checks at start and then once a day.
+
+### Documentation
+
+- A wiki with installation, Docker Compose, first start, configuration, updating, roles and requests, folder structure, troubleshooting and development.
+- The README now starts with Docker.
+
 ## [1.0.0] - 2026-11-13
 
 First public release.
@@ -47,5 +72,6 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Koxility/kura/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Koxility/kura/releases/tag/v1.0.0
