@@ -1,0 +1,14 @@
+# Only what the image build needs goes into the build context.
+.git
+.github
+target
+web/node_modules
+web/dist
+data
+downloads
+docs
+*.db
+*.db-*
+*.log
+.env
+.env.*
