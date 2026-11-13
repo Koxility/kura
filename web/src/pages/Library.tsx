@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type Entry, formatBytes, type LibraryRoot } from "../api";
+import { Check } from "../Check";
 import ui from "../ui.module.css";
 import styles from "./Library.module.css";
 
@@ -69,8 +70,9 @@ function Folder({
         <span className={styles.chevron} aria-hidden="true">
           {open ? "▾" : "▸"}
         </span>
-        <span className={ui.grow}>{name}</span>
-        {detail && <span className={`${ui.mono} ${ui.muted}`}>{detail}</span>}
+        <span className={styles.name}>{name}</span>
+        {detail && <span className={`${ui.mono} ${ui.muted} ${styles.detail}`}>{detail}</span>}
+        {isTitle(path) && <Check label="Downloaded series" />}
       </button>
       {open && (
         <ul role="group" className={styles.group}>
@@ -110,4 +112,11 @@ function Folder({
       )}
     </li>
   );
+}
+
+/** A series folder: directly in a library, or in the `Series` folder older versions used. */
+function isTitle(path: string) {
+  const parts = path.split("/");
+  return (parts.length === 1 && parts[0] !== "" && parts[0] !== "Series") ||
+    (parts.length === 2 && parts[0] === "Series");
 }

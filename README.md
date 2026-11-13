@@ -32,6 +32,7 @@ Kura (蔵, "storehouse") is a self-hosted web app. You browse AniWorld and Serie
 **Keep** — a tidy library that stays current.
 
 - Libraries: named folders with a default per site, with the IMDb ID in every series folder.
+- Already downloaded titles and episodes are marked with a green check, found by IMDb ID or name, also for files Kura did not download itself.
 - Auto-Sync checks downloaded series for new episodes on a schedule, or right now with one click.
 
 **Share** — one server for the whole household.
@@ -96,15 +97,14 @@ To update, run `docker compose pull && docker compose up -d`. The top bar shows 
 Inside every library Kura writes
 
 ```
-Series/
-  One Piece [imdbid-tt0388629]/
-    Season 01/
-      One Piece S01E001 German Dub.mkv
+One Piece [imdbid-tt0388629]/
+  Season 01/
+    One Piece S01E001 German Dub.mkv
 ```
 
 The file name follows a template you set under Settings → Downloads (or with `KURA_NAMING_TEMPLATE`), with `{title}`, `{episodenumber}`, `{language}`, `{season}`, `{episode}` and `{imdbid}`.
 
-Point a Jellyfin "Shows" library at the `Series` folder. The IMDb ID comes from the site; when the site has none, Kura asks for it before downloading, and `[imdbid-none]` is used if you skip.
+Point a Jellyfin "Shows" library at the library folder. The IMDb ID comes from the site; when the site has none, Kura asks for it before downloading, and `[imdbid-none]` is used if you skip.
 
 ## Configuration
 

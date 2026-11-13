@@ -1,6 +1,8 @@
 import { Link } from "react-router";
 import { type SeriesSummary, siteNames } from "../api";
+import { Check } from "../Check";
 import ui from "../ui.module.css";
+import styles from "./SeriesGrid.module.css";
 
 /** A grid of covers for a list of series that may still be loading or have failed. */
 export function SeriesGrid({
@@ -28,7 +30,8 @@ export function SeriesGrid({
     <ul className={ui.grid}>
       {query.data.slice(0, limit).map((series) => (
         <li key={`${series.site}/${series.slug}`}>
-          <Link to={`/series/${series.site}/${series.slug}`} className={ui.card}>
+          <Link to={`/series/${series.site}/${series.slug}`} className={`${ui.card} ${styles.card}`}>
+            {series.downloaded && <Check badge label="Already downloaded" />}
             {series.cover_url ? (
               // The title below names the series, so the image is decoration.
               <img

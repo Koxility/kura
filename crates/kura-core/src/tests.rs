@@ -44,6 +44,7 @@ impl Site for FakeSite {
     async fn series(&self, slug: &str) -> kura_sites::Result<Series> {
         Ok(Series {
             summary: SeriesSummary {
+                downloaded: false,
                 site: SiteId::AniWorld,
                 slug: slug.to_owned(),
                 title: "Lantern: Road?".to_owned(),
@@ -160,6 +161,9 @@ impl Download for FakeDownload {
         if stream.url.contains("slow") {
             std::future::pending::<()>().await;
         }
+        // A real, empty file, so folder lookups see what was downloaded.
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(target, b"").unwrap();
         let done = (stream.url.clone(), target.to_owned());
         self.0.lock().unwrap().push(done);
         Ok(())
@@ -284,9 +288,8 @@ async fn falls_back_to_the_next_hoster_and_then_the_next_language() {
     assert_eq!(s.queue(first(), Choices::default()).await.unwrap(), 1);
     let jobs = states(&s.core, &[JobState::Done]).await;
 
-    let target = s.path(
-        "main/Series/Lantern Road [imdbid-tt0388629]/Season 01/Lantern Road S01E001 German Sub.mkv",
-    );
+    let target = s
+        .path("main/Lantern Road [imdbid-tt0388629]/Season 01/Lantern Road S01E001 German Sub.mkv");
     assert_eq!(jobs[0].path.as_deref(), target.to_str());
     assert_eq!(
         *s.downloads.lock().unwrap(),
@@ -451,7 +454,7 @@ async fn downloads_go_to_the_picked_then_the_default_then_the_main_library() {
     let dirs: Vec<_> = jobs.iter().map(|job| PathBuf::from(&job.dir)).collect();
     assert_eq!(dirs, [s.path("other"), s.path("anime"), s.path("main")]);
     let file = PathBuf::from(jobs[0].path.as_deref().unwrap());
-    assert!(file.starts_with(s.path("other/Series")));
+    assert!(file.starts_with(s.path("other/Lantern Road [imdbid-tt0388629]")));
 }
 
 #[tokio::test]
@@ -673,20 +676,29 @@ fn titles_become_safe_folder_names() {
             &job(imdb),
             Language::GermanDub,
             OutputFormat::Mp4,
+            None,
         )
     };
     let file = "Season 00/some-slug S00E012.mp4";
-    let id = Path::new("dl/Series/some-slug [imdbid-tt0388629]").join(file);
+    let id = Path::new("dl/some-slug [imdbid-tt0388629]").join(file);
     assert_eq!(path(Some("tt0388629")), id);
-    let none = Path::new("dl/Series/some-slug [imdbid-none]").join(file);
+    let none = Path::new("dl/some-slug [imdbid-none]").join(file);
     assert_eq!(path(Some("none")), none);
-    // Downloads from before IMDb IDs keep their folder.
-    assert_eq!(path(None), Path::new("dl/Series/some-slug").join(file));
-    // A broken stored value never reaches the path.
-    assert_eq!(
-        path(Some("../x")),
-        Path::new("dl/Series/some-slug").join(file)
+    // Without an ID the folder is the title alone.
+    assert_eq!(path(None), Path::new("dl/some-slug").join(file));
+    // A series that already has a folder keeps it, whatever the layout.
+    let old = Path::new("dl/Series/some-slug");
+    let kept = target_path(
+        Path::new("dl"),
+        "{title} {episodenumber}",
+        &job(Some("tt0388629")),
+        Language::GermanDub,
+        OutputFormat::Mp4,
+        Some(old),
     );
+    assert_eq!(kept, old.join(file));
+    // A broken stored value never reaches the path.
+    assert_eq!(path(Some("../x")), Path::new("dl/some-slug").join(file));
 }
 
 #[tokio::test]
@@ -909,4 +921,75 @@ async fn a_custom_naming_template_names_the_file() {
     let file = PathBuf::from(jobs[0].path.as_deref().unwrap());
     let name = file.file_name().unwrap().to_string_lossy().into_owned();
     assert_eq!(name, "S01E001 - Lantern Road [German Dub].mkv");
+}
+
+#[tokio::test]
+async fn new_episodes_join_the_folder_of_earlier_ones() {
+    let s = setup(vec![link(Language::GermanDub, "voe", "https://voe/x")], 1);
+    s.queue(first(), Choices::default()).await.unwrap();
+    let jobs = states(&s.core, &[JobState::Done]).await;
+    let folder = s.path("main/Lantern Road [imdbid-tt0388629]");
+    assert!(PathBuf::from(jobs[0].path.as_deref().unwrap()).starts_with(&folder));
+
+    // Another library becomes the default; the series still stays where it started.
+    let mut settings = s.core.settings().unwrap();
+    settings
+        .libraries
+        .push(library("Anime", s.path("anime"), vec![SiteId::AniWorld]));
+    s.core.save_settings(&settings).unwrap();
+    let second = Selection::Picked {
+        seasons: Vec::new(),
+        episodes: vec![(1, 2)],
+    };
+    s.queue(second, Choices::default()).await.unwrap();
+    let jobs = states(&s.core, &[JobState::Done; 2]).await;
+    let file = PathBuf::from(jobs[1].path.as_deref().unwrap());
+    assert!(file.starts_with(&folder), "{file:?}");
+}
+
+#[tokio::test]
+async fn downloaded_titles_and_episodes_are_found_by_database_id_and_name() {
+    let s = setup(vec![link(Language::GermanDub, "voe", "https://voe/x")], 1);
+    // A series Kura downloaded.
+    s.queue(first(), Choices::default()).await.unwrap();
+    states(&s.core, &[JobState::Done]).await;
+    // Folders put into the library by hand: one with an IMDb ID, one by name only.
+    let by_id = s.path("main/Whatever Name [imdbid-tt7654321]/Season 02");
+    std::fs::create_dir_all(&by_id).unwrap();
+    std::fs::write(by_id.join("x S02E005.mkv"), b"").unwrap();
+    std::fs::write(by_id.join("x S02E006.mkv.part"), b"").unwrap();
+    let by_name = s.path("main/Series/Glass County/Season 01");
+    std::fs::create_dir_all(&by_name).unwrap();
+    std::fs::write(by_name.join("Glass County - S01E03.mp4"), b"").unwrap();
+    std::fs::write(by_name.join("poster.jpg"), b"").unwrap();
+    s.core.forget_scan();
+
+    let episodes = |slug, title, imdb| {
+        s.core
+            .downloaded_episodes(SiteId::AniWorld, slug, title, imdb)
+            .unwrap()
+    };
+    assert_eq!(
+        episodes("lantern-road", "Lantern Road", Some("tt0388629")),
+        [(1, 1)]
+    );
+    assert_eq!(episodes("other", "Any Title", Some("tt7654321")), [(2, 5)]);
+    assert_eq!(episodes("glass-county", "Glass County!", None), [(1, 3)]);
+    assert!(episodes("nothing", "Nothing Here", Some("none")).is_empty());
+
+    let summary = |slug: &str, title: &str| SeriesSummary {
+        downloaded: false,
+        site: SiteId::AniWorld,
+        slug: slug.to_owned(),
+        title: title.to_owned(),
+        cover_url: None,
+    };
+    let mut list = vec![
+        summary("lantern-road", "Renamed On The Site"),
+        summary("glass-county", "glass county"),
+        summary("nothing", "Nothing Here"),
+    ];
+    s.core.mark_downloaded(&mut list).unwrap();
+    let marks: Vec<_> = list.iter().map(|series| series.downloaded).collect();
+    assert_eq!(marks, [true, true, false]);
 }

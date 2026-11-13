@@ -98,7 +98,7 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 10px 4px 10px 28px;
+  padding: 10px 4px 10px 6px;
   border-bottom: 1px solid var(--line);
   font-size: var(--size-m);
 }
@@ -132,4 +132,12 @@
   .cover {
     width: 120px;
   }
+}
+
+/* Room for the downloaded mark left of every episode, filled or not, so rows line up. */
+.status {
+  display: inline-grid;
+  flex: none;
+  width: 18px;
+  margin-right: -6px;
 }

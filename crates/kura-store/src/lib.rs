@@ -232,6 +232,26 @@ impl Store {
             .optional()?)
     }
 
+    /// Replaces a user's password hash and ends their other sessions, so a changed password
+    /// also logs out every other device.
+    pub fn set_password(
+        &self,
+        user_id: i64,
+        password_hash: &str,
+        keep_session: &str,
+    ) -> Result<()> {
+        let conn = self.conn();
+        conn.execute(
+            "UPDATE users SET password_hash = ?2 WHERE id = ?1",
+            params![user_id, password_hash],
+        )?;
+        conn.execute(
+            "DELETE FROM sessions WHERE user_id = ?1 AND token_hash != ?2",
+            params![user_id, keep_session],
+        )?;
+        Ok(())
+    }
+
     pub fn delete_session(&self, token_hash: &str) -> Result<()> {
         self.conn()
             .execute("DELETE FROM sessions WHERE token_hash = ?1", [token_hash])?;
@@ -362,6 +382,22 @@ impl Store {
                 request,
             )
             .optional()?)
+    }
+
+    /// Deletes a user's own request while nobody has decided on it. Returns whether it did.
+    pub fn cancel_request(&self, id: i64, user_id: i64) -> Result<bool> {
+        let deleted = self.conn().execute(
+            "DELETE FROM requests WHERE id = ?1 AND user_id = ?2 AND state = 'open'",
+            params![id, user_id],
+        )?;
+        Ok(deleted > 0)
+    }
+
+    /// Deletes accepted and rejected requests; open ones stay. Returns how many.
+    pub fn clear_decided_requests(&self) -> Result<usize> {
+        Ok(self
+            .conn()
+            .execute("DELETE FROM requests WHERE state != 'open'", [])?)
     }
 
     /// Puts a request back to open, when accepting it failed half-way.
@@ -850,9 +886,36 @@ mod tests {
             store.requests(Some(sam.id)).unwrap()[0].state,
             RequestState::Open
         );
+
+        // Only the owner can cancel, and only while it is open.
+        assert!(!store.cancel_request(first, admin.id).unwrap());
+        assert!(store.cancel_request(first, sam.id).unwrap());
+        assert!(!store.cancel_request(first, sam.id).unwrap());
+        let third = store.create_request(&new(sam.id)).unwrap();
+        store
+            .decide_request(third, RequestState::Rejected, 40)
+            .unwrap();
+        assert!(!store.cancel_request(third, sam.id).unwrap());
+        // Clearing removes decided requests and keeps open ones.
+        assert_eq!(store.clear_decided_requests().unwrap(), 1);
+        let left: Vec<_> = store.requests(None).unwrap().iter().map(|r| r.id).collect();
+        assert_eq!(left, [second]);
+        store.create_request(&new(sam.id)).unwrap();
+
         // A deleted user's requests go with them.
         store.delete_user(sam.id).unwrap();
         assert_eq!(store.requests(None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_new_password_ends_the_other_sessions() {
+        let (store, admin) = store_with_admin();
+        store.create_session("here", admin.id, 100, 1000).unwrap();
+        store.create_session("there", admin.id, 100, 1000).unwrap();
+        store.set_password(admin.id, "new-hash", "here").unwrap();
+        assert_eq!(store.credentials("admin").unwrap().unwrap().1, "new-hash");
+        assert!(store.session_user("here", 101).unwrap().is_some());
+        assert!(store.session_user("there", 101).unwrap().is_none());
     }
 
     #[test]

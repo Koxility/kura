@@ -105,6 +105,7 @@ fn parse_cards(html: &str, css: &'static str) -> Vec<SeriesSummary> {
     for card in Html::parse_document(html).select(&sel(css)) {
         let summary = (|| {
             Some(SeriesSummary {
+                downloaded: false,
                 site: SiteId::SerienStream,
                 slug: slug_from(card.value().attr("href")?, SERIES)?,
                 title: first_attr(card, "img[alt]", "alt")?.to_owned(),
@@ -130,6 +131,7 @@ fn parse_latest(html: &str) -> Vec<SeriesSummary> {
         let path = link.value().attr("href")?.strip_prefix(SERIES)?;
         let slug = check_slug(path.split('/').next()?).ok()?;
         Some(SeriesSummary {
+            downloaded: false,
             site: SiteId::SerienStream,
             slug: slug.to_owned(),
             title: text(link),
@@ -162,6 +164,7 @@ fn parse_all(html: &str) -> Vec<SeriesSummary> {
     let links = doc.select(&selector);
     unique(links.filter_map(|link| {
         Some(SeriesSummary {
+            downloaded: false,
             site: SiteId::SerienStream,
             slug: slug_from(link.value().attr("href")?, SERIES)?,
             title: text(link),
@@ -197,6 +200,7 @@ fn parse_series(slug: &str, html: &str) -> Result<Series> {
 
     Ok(Series {
         summary: SeriesSummary {
+            downloaded: false,
             site: SiteId::SerienStream,
             slug: slug.to_owned(),
             title,

@@ -69,6 +69,24 @@ impl Core {
         Ok(queued)
     }
 
+    /// Withdraws one of `user_id`'s own requests while it is still open.
+    pub fn cancel_request(&self, id: i64, user_id: i64) -> Result<()> {
+        if !self.store.cancel_request(id, user_id)? {
+            return Err(CoreError::Invalid(
+                "only your own open requests can be cancelled",
+            ));
+        }
+        let _ = self.events.send(Event::RequestsChanged);
+        Ok(())
+    }
+
+    /// Removes accepted and rejected requests from the list. Returns how many.
+    pub fn clear_requests(&self) -> Result<usize> {
+        let cleared = self.store.clear_decided_requests()?;
+        let _ = self.events.send(Event::RequestsChanged);
+        Ok(cleared)
+    }
+
     pub fn reject_request(&self, id: i64) -> Result<()> {
         let decided = self
             .store

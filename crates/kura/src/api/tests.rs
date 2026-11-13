@@ -189,6 +189,39 @@ async fn settings_and_users_are_for_admins() {
     let denied = server.call(Method::POST, "/autosync/exclude", &user, excluded);
     assert_eq!(denied.await.0, 403);
     assert_eq!(server.get("/queue", &user).await.0, 200);
+    // Every account changes its own password.
+    let wrong = json!({ "current": "nope", "new": "another horse" });
+    assert_eq!(
+        server
+            .call(Method::PUT, "/account/password", &user, wrong)
+            .await
+            .0,
+        403
+    );
+    let new = json!({ "current": "battery staple", "new": "another horse" });
+    assert_eq!(
+        server
+            .call(Method::PUT, "/account/password", &user, new)
+            .await
+            .0,
+        204
+    );
+    assert_eq!(server.get("/queue", &user).await.0, 200);
+    let user = server.log_in("/login", "sam", "another horse").await;
+    // Clearing requests is for admins; cancelling someone else's request is refused.
+    assert_eq!(
+        server
+            .call(Method::POST, "/requests/clear", &user, Value::Null)
+            .await
+            .0,
+        403
+    );
+    let cancel = server.call(Method::POST, "/requests/999/cancel", &user, Value::Null);
+    assert_eq!(cancel.await.0, 400);
+    let (code, found) = server
+        .get("/series/aniworld/x/downloaded?title=X", &user)
+        .await;
+    assert_eq!((code, found), (200, json!([])));
     assert_eq!(server.get("/requests", &user).await, (200, json!([])));
     // A bad IMDb answer is refused before any site is asked.
     let bad = json!({ "site": "aniworld", "slug": "x", "all": true, "imdb_id": "123" });

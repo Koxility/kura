@@ -9,3 +9,14 @@
   width: 100%;
   max-width: 360px;
 }
+
+/* The name and its note sit centred above the fields. */
+.form > h1,
+.form > p {
+  text-align: center;
+}
+
+.form > h1 {
+  font-size: clamp(40px, 8vw, 56px);
+  letter-spacing: -0.05em;
+}

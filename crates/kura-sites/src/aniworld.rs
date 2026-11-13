@@ -121,6 +121,7 @@ fn parse_search(hits: Vec<Hit>) -> Vec<SeriesSummary> {
     hits.into_iter()
         .filter_map(|hit| {
             Some(SeriesSummary {
+                downloaded: false,
                 site: SiteId::AniWorld,
                 slug: slug_from(&hit.link, SERIES)?,
                 // Titles carry <em> around the match and HTML entities.
@@ -139,6 +140,7 @@ fn parse_popular(html: &str) -> Vec<SeriesSummary> {
         .select(&sel(".seriesListContainer a[href]"))
         .filter_map(|card| {
             Some(SeriesSummary {
+                downloaded: false,
                 site: SiteId::AniWorld,
                 slug: slug_from(card.value().attr("href")?, SERIES)?,
                 title: first_text(card, "h3")?,
@@ -179,6 +181,7 @@ fn parse_all(html: &str) -> Vec<SeriesSummary> {
     let links = doc.select(&selector);
     unique(links.filter_map(|link| {
         Some(SeriesSummary {
+            downloaded: false,
             site: SiteId::AniWorld,
             slug: slug_from(link.value().attr("href")?, SERIES)?,
             title: text(link),
@@ -210,6 +213,7 @@ fn parse_series(slug: &str, html: &str) -> Result<Series> {
 
     Ok(Series {
         summary: SeriesSummary {
+            downloaded: false,
             site: SiteId::AniWorld,
             slug: slug.to_owned(),
             title,

@@ -10,7 +10,7 @@ There is no way to recover a forgotten admin password from the web app. Choose o
 
 Next, Kura asks for a library: the folder downloads go to.
 
-- **Name**: anything, e.g. `Series` or `Anime`.
+- **Name**: anything, e.g. `Anime` or `Serien`.
 - **Folder on the server**: with Docker, a path *inside the container*, e.g. `/media` or `/media/anime` (see [[Docker Compose|Docker-Compose]]). From source, any absolute path on the machine.
 - **Sites**: which sites download into this library by default.
 
