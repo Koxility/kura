@@ -4,10 +4,11 @@
 
 **Download anime and series from AniWorld and SerienStream. Your library stays Jellyfin-ready.**
 
-[![Latest release](https://img.shields.io/github/v/release/Koxility/kura?label=release&color=3ecf8e)](https://github.com/Koxility/kura/releases/latest)
-[![License: MIT](https://img.shields.io/badge/license-MIT-f5f5f5)](LICENSE)
-[![Docker image](https://img.shields.io/badge/docker-ghcr.io%2Fkoxility%2Fkura-a1a1a1)](https://github.com/Koxility/kura/pkgs/container/kura)
-![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-a1a1a1)
+[![Latest release](https://img.shields.io/github/v/release/Koxility/kura?label=release&color=3b82f6)](https://github.com/Koxility/kura/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Docker image](https://img.shields.io/badge/docker-ghcr.io%2Fkoxility%2Fkura-green)](https://github.com/Koxility/kura/pkgs/container/kura)
+![Platform: Linux](https://img.shields.io/badge/platform-Linux-green)
+![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-green)
 
 [Features](#features) · [Installation](#installation) · [Getting started](#getting-started) · [Configuration](#configuration) · [API](#api) · [Documentation](#documentation)
 
@@ -160,14 +161,16 @@ Tests that talk to the real sites and providers are skipped by default:
 cargo test -p kura-sites -p kura-hosters -- --ignored
 ```
 
+## Legal disclaimer
+
+Kura is a client-side tool that saves downloads to locations you choose. It does not operate a media-hosting service for third-party sites.
+
+You are responsible for how you use it and for following the laws and terms that apply where you live. The project is provided "as is". Its maintainers are not responsible for third-party content, external links, or the availability, accuracy, legality, or reliability of outside services.
+
+Questions about content hosted by another service should be directed to that service.
+
+Kura is an independent project. It is not affiliated with, endorsed by or sponsored by AniWorld, SerienStream, any video provider, IMDb or Jellyfin; their names and trademarks belong to their respective owners. Questions about content hosted by another service should be directed to that service.
+
 ## License
 
 Kura is free software, licensed under the [MIT License](LICENSE).
-
-## Legal disclaimer
-
-Kura is a client-side tool. It reads publicly reachable pages of the sites you choose and passes the video links found there to ffmpeg, which saves them to storage you control. It does not host, provide, index or distribute any media, and the project runs no servers of its own.
-
-You are responsible for how you use it, for what you download, and for following the laws and terms of service that apply where you live. In many countries, including Germany, downloading copyrighted works from sources that are not licensed to offer them is not allowed. The project is provided "as is", without warranty of any kind. Its maintainers are not responsible for third-party content, external links, or the availability, accuracy, legality or reliability of outside services.
-
-Kura is an independent project. It is not affiliated with, endorsed by or sponsored by AniWorld, SerienStream, any video provider, IMDb or Jellyfin; their names and trademarks belong to their respective owners. Questions about content hosted by another service should be directed to that service.
