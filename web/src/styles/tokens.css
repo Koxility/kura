@@ -1,0 +1,31 @@
+/* Every colour, size and duration in the app comes from here. */
+:root {
+  --bg: #0a0a0a;
+  --surface: #141414;
+  --hover: #1c1c1c;
+  --line: #262626;
+
+  --text: #f5f5f5;
+  --text-2: #a1a1a1;
+  --text-3: #6b6b6b;
+
+  /* State only. There is no brand colour: primary actions are --text on --bg. */
+  --ok: #3ecf8e;
+  --warn: #f5a524;
+  --bad: #f04438;
+
+  --font: "Geist Variable", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+
+  --size-s: 13px;
+  --size-m: 15px;
+  --size-l: 20px;
+  --size-xl: 32px;
+
+  --radius: 8px;
+  --radius-cover: 6px;
+  --fast: 140ms ease-out;
+
+  --rail: 208px;
+  --content: 1080px;
+}

@@ -1,0 +1,434 @@
+/* Shared building blocks. Page-specific layout lives next to each page. */
+
+.muted {
+  color: var(--text-2);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--size-s);
+  font-variant-numeric: tabular-nums;
+}
+
+.lead {
+  max-width: 68ch;
+  margin: 16px auto 0;
+  color: var(--text-2);
+  text-align: center;
+}
+
+.section {
+  margin: 56px 0 16px;
+  text-align: center;
+  font-size: var(--size-l);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.notice {
+  margin: 32px 0;
+  color: var(--text-2);
+  text-align: center;
+}
+
+.error {
+  margin: 12px 0 0;
+  text-align: center;
+  color: var(--bad);
+  font-size: var(--size-s);
+  overflow-wrap: anywhere;
+}
+
+/* Buttons */
+
+.button,
+.primary,
+.ghost {
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: 500 var(--size-s) / 1.4 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--fast),
+    border-color var(--fast),
+    opacity var(--fast);
+}
+
+.button:hover,
+.ghost:hover {
+  background: var(--hover);
+}
+
+.primary {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--bg);
+}
+
+.primary:hover {
+  opacity: 0.86;
+}
+
+.ghost {
+  border-color: transparent;
+  color: var(--text-2);
+}
+
+.button:disabled,
+.primary:disabled,
+.ghost:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Forms */
+
+.field {
+  display: grid;
+  gap: 6px;
+  margin-top: 20px;
+  color: var(--text-2);
+  font-size: var(--size-s);
+}
+
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: 400 var(--size-m) / 1.4 var(--font);
+  transition: border-color var(--fast);
+}
+
+.input:hover,
+.input:focus {
+  border-color: var(--text-3);
+}
+
+.input::placeholder {
+  color: var(--text-3);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+/* Lists with hairline dividers */
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ok {
+  color: var(--ok);
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.bad {
+  color: var(--bad);
+}
+
+/* Cover grid */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 32px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: block;
+}
+
+.cover {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-cover);
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: var(--size-xl);
+  font-weight: 600;
+  object-fit: cover;
+  transition: opacity var(--fast);
+}
+
+.card:hover .cover {
+  opacity: 0.8;
+}
+
+.cardTitle {
+  display: block;
+  margin-top: 10px;
+  font-size: var(--size-s);
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.cardSite {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* Progress: a thin line along the bottom edge of its row */
+
+.progress {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--text);
+  transition: width 400ms linear;
+}
+
+@media (max-width: 720px) {
+  .row {
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 24px 12px;
+  }
+}
+
+/* Segmented control: one of a few choices, e.g. the site switcher and filter tabs */
+
+.segmented {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 3px);
+}
+
+.segment {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  font: 500 var(--size-s) / 1.4 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--fast),
+    color var(--fast);
+}
+
+.segment:hover {
+  color: var(--text);
+}
+
+.segment[aria-pressed="true"],
+.segment[aria-current="page"] {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* Chips: many small choices, e.g. genres */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: 400 var(--size-s) / 1.4 var(--font);
+  cursor: pointer;
+  transition:
+    border-color var(--fast),
+    color var(--fast);
+}
+
+.chip:hover,
+.chip[aria-pressed="true"] {
+  border-color: var(--text-2);
+  color: var(--text);
+}
+
+/* A checkbox or switch with its label */
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: var(--size-m);
+  cursor: pointer;
+}
+
+/* Only the box itself: a label may also hold a number or time field. */
+.check input[type="checkbox"],
+.check input[type="radio"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--text);
+}
+
+.badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* A row of controls above a list */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0;
+}
+
+.toolbar > .segmented {
+  margin-inline: 0;
+}
+
+.toolbar .input {
+  width: auto;
+  flex: 1;
+  min-width: 160px;
+  max-width: 320px;
+}
+
+.compact {
+  width: auto;
+  padding: 7px 10px;
+  font-size: var(--size-s);
+}
+
+.row .error {
+  text-align: left;
+}
+
+.small {
+  margin: 2px 0 0;
+  font-size: var(--size-s);
+}
+
+/* A round, quiet icon button, e.g. back. */
+.round {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    color var(--fast),
+    border-color var(--fast);
+}
+
+.round:hover {
+  border-color: var(--text-3);
+  color: var(--text);
+}
+
+/* A modal dialog. */
+.dialog {
+  width: min(420px, calc(100vw - 32px));
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 4px);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.dialog::backdrop {
+  background: rgb(0 0 0 / 60%);
+}
+
+.dialog h2 {
+  margin: 0;
+  font-size: var(--size-l);
+  letter-spacing: -0.02em;
+}
+
+.dialog p {
+  margin: 10px 0 0;
+  color: var(--text-2);
+  font-size: var(--size-s);
+}
+
+.dialog .actions {
+  justify-content: flex-end;
+}

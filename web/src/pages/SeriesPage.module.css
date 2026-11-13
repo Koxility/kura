@@ -1,0 +1,135 @@
+.header {
+  display: flex;
+  gap: 32px;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+/* Beside the cover, the text reads from the left. */
+.header h1,
+.header p {
+  text-align: left;
+}
+
+.header .description {
+  margin-inline: 0;
+}
+
+.cover {
+  flex: none;
+  width: 180px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-cover);
+  background: var(--surface);
+  object-fit: cover;
+}
+
+.description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+}
+
+.back {
+  margin-bottom: 24px;
+}
+
+/* Seasons as a tree, each season a row that opens to its episodes. */
+.tree {
+  max-width: 860px;
+  margin: 48px auto 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.season {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.seasonToggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: 500 var(--size-m) / 1.5 var(--font);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--fast);
+}
+
+.seasonToggle:hover {
+  background: var(--hover);
+}
+
+.chevron {
+  flex: none;
+  width: 12px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.wholeCheck {
+  flex: none;
+  padding: 0 4px 0 16px;
+  font-size: var(--size-s);
+}
+
+.wholeLabel {
+  color: var(--text-3);
+}
+
+.episodes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.episode {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 4px 10px 28px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--size-m);
+}
+
+/* Choices and buttons come after the tree, at the end of the page. */
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 16px;
+  margin-top: 40px;
+}
+
+.options > label {
+  width: 220px;
+}
+
+.exclude {
+  flex-basis: 100%;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+@media (max-width: 720px) {
+  .header {
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .cover {
+    width: 120px;
+  }
+}

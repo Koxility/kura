@@ -1,0 +1,47 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[workspace.dependencies]
+kura-core = { path = "crates/kura-core" }
+kura-domain = { path = "crates/kura-domain" }
+kura-download = { path = "crates/kura-download" }
+kura-hosters = { path = "crates/kura-hosters" }
+kura-sites = { path = "crates/kura-sites" }
+kura-store = { path = "crates/kura-store" }
+
+async-trait = "0.1"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+reqwest = { version = "0.13", features = ["json", "form", "query"] }
+scraper = "0.29"
+tokio = { version = "1", features = ["macros", "rt"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite_migration = "2.6"
+tempfile = "3"
+
+# Password hashing is far too slow unoptimised; this keeps logins and tests quick in debug builds.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+strip = true
