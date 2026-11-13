@@ -89,7 +89,9 @@ export function AutoSyncPage() {
       <h2 className={ui.section}>Tracked titles</h2>
       {status.isSuccess && tracked.length === 0 && (
         <p className={ui.notice}>
-          Nothing is tracked yet. A title is tracked once one of its episodes is downloaded.
+          {excluded.length > 0
+            ? "No title is tracked. Removed titles are listed under Exclude titles."
+            : "Nothing is tracked yet. A title is tracked once one of its episodes is downloaded."}
         </p>
       )}
       <ul className={ui.list}>
@@ -106,6 +108,21 @@ export function AutoSyncPage() {
               {title.result ?? "Not checked yet"}
               {title.checked_at && ` · ${formatTime(title.checked_at)}`}
             </span>
+            <button
+              type="button"
+              className={ui.ghost}
+              disabled={exclude.isPending}
+              title="Stop checking this title. It moves to the excluded titles below."
+              aria-label={`Remove ${title.title} from Auto-Sync`}
+              onClick={() =>
+                exclude.mutate({
+                  title: { site: title.site, slug: title.slug, title: title.title },
+                  excluded: true,
+                })
+              }
+            >
+              Remove
+            </button>
           </li>
         ))}
       </ul>

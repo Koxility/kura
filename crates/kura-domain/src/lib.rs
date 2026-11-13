@@ -82,6 +82,9 @@ pub struct SeriesSummary {
     pub slug: String,
     pub title: String,
     pub cover_url: Option<String>,
+    /// Set by the core when at least one episode is in a library.
+    #[serde(default)]
+    pub downloaded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

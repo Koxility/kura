@@ -15,7 +15,7 @@ use axum::{
         IntoResponse, Response,
         sse::{Event as SseEvent, KeepAlive, Sse},
     },
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use kura_core::{
     Choices, Core, CoreError, Entry, Event, LibraryRoot, REPOSITORY, SESSION_TTL, Selection,
@@ -39,6 +39,7 @@ pub fn router(core: Arc<Core>) -> Router {
         .route("/setup", post(setup))
         .route("/login", post(login))
         .route("/logout", post(logout))
+        .route("/account/password", put(change_password))
         .route("/search", get(search))
         .route("/popular/{site}", get(popular))
         .route("/new/{site}", get(latest))
@@ -47,11 +48,14 @@ pub fn router(core: Arc<Core>) -> Router {
         .route("/random/{site}", get(random))
         .route("/series/{site}/{slug}", get(series))
         .route("/series/{site}/{slug}/seasons/{season}", get(episodes))
+        .route("/series/{site}/{slug}/downloaded", get(downloaded))
         .route("/queue", get(jobs).post(enqueue))
         .route("/queue/clear", post(clear_finished))
         .route("/queue/{id}/cancel", post(cancel))
         .route("/queue/{id}/retry", post(retry))
         .route("/requests", get(requests).post(create_request))
+        .route("/requests/clear", post(clear_requests))
+        .route("/requests/{id}/cancel", post(cancel_request))
         .route("/requests/{id}/accept", post(accept_request))
         .route("/requests/{id}/reject", post(reject_request))
         .route("/events", get(events))
@@ -213,6 +217,29 @@ async fn login(State(core): App, Json(form): Json<Credentials>) -> ApiResult<Res
     Ok((session_cookie(&token, SESSION_TTL), Json(user)).into_response())
 }
 
+#[derive(Deserialize)]
+struct NewPassword {
+    current: String,
+    new: String,
+}
+
+/// Every account changes its own password; the other sessions of that account end.
+async fn change_password(
+    State(core): App,
+    session: Session,
+    Json(form): Json<NewPassword>,
+) -> ApiResult<StatusCode> {
+    let changed = core.change_password(&session.user, &session.token, &form.current, &form.new);
+    if changed.await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(error(
+            StatusCode::FORBIDDEN,
+            "the current password is wrong",
+        ))
+    }
+}
+
 async fn logout(State(core): App, session: Session) -> ApiResult<Response> {
     core.logout(&session.token)?;
     Ok((session_cookie("", 0), StatusCode::NO_CONTENT).into_response())
@@ -332,6 +359,24 @@ async fn episodes(
     Ok(Json(core.episodes(site, &slug, season).await?))
 }
 
+/// Title and IMDb ID as the title page shows them, to find the series' folder by name or ID.
+#[derive(Deserialize)]
+struct SeriesNames {
+    title: String,
+    imdb: Option<String>,
+}
+
+/// `[season, episode]` pairs that are already in a library.
+async fn downloaded(
+    State(core): App,
+    _: Session,
+    Path((site, slug)): Path<(SiteId, String)>,
+    Query(names): Query<SeriesNames>,
+) -> ApiResult<Json<Vec<(u32, u32)>>> {
+    let found = core.downloaded_episodes(site, &slug, &names.title, names.imdb.as_deref());
+    Ok(Json(found?))
+}
+
 // Queue
 
 /// `all` queues the whole series. Otherwise `seasons` lists whole seasons and `episodes`
@@ -424,6 +469,20 @@ async fn create_request(
     let picked = wanted.picked();
     let id = core.request(wanted.site, &wanted.slug, &picked, &choices, user);
     Ok(Json(json!({ "id": id.await? })))
+}
+
+/// A user withdraws one of their own open requests.
+async fn cancel_request(
+    State(core): App,
+    session: Session,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
+    core.cancel_request(id, session.user.id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn clear_requests(State(core): App, _: Admin) -> ApiResult<Json<Value>> {
+    Ok(Json(json!({ "cleared": core.clear_requests()? })))
 }
 
 async fn accept_request(

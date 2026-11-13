@@ -3,6 +3,7 @@
 //! Front ends (the web server, later a bot) call `Core` and nothing below it.
 
 mod auth;
+mod downloaded;
 mod library;
 mod naming;
 mod net;
@@ -19,7 +20,7 @@ use std::{
 use async_trait::async_trait;
 pub use auth::SESSION_TTL;
 use kura_domain::{
-    Episode, EpisodeId, Genre, HosterLink, Job, Language, OutputFormat, Schedule, Series,
+    Episode, EpisodeId, Genre, HosterLink, Job, JobState, Language, OutputFormat, Schedule, Series,
     SeriesSummary, Settings, SiteId, Stream, TitleRef,
 };
 use kura_download::{DownloadError, Progress};
@@ -155,6 +156,8 @@ pub struct Core {
     sync_wake: Notify,
     /// When GitHub was last asked for a newer release, and the answer.
     update: Mutex<Option<(Instant, Option<String>)>>,
+    /// Series folders found in the libraries, kept for a moment.
+    scan: Mutex<Option<downloaded::Scan>>,
 }
 
 /// When a site's full list was fetched, and the list.
@@ -182,6 +185,7 @@ impl Core {
             sync: Mutex::default(),
             sync_wake: Notify::new(),
             update: Mutex::default(),
+            scan: Mutex::default(),
         })
     }
 
@@ -241,17 +245,23 @@ impl Core {
         }
         match failure {
             Some(err) if found.is_empty() => Err(err.into()),
-            _ => Ok(found),
+            _ => self.marked(found),
         }
     }
 
     pub async fn popular(&self, site: SiteId) -> Result<Vec<SeriesSummary>> {
-        Ok(self.site(site)?.popular().await?)
+        self.marked(self.site(site)?.popular().await?)
     }
 
     /// Recently added titles, newest first.
     pub async fn latest(&self, site: SiteId) -> Result<Vec<SeriesSummary>> {
-        Ok(self.site(site)?.latest().await?)
+        self.marked(self.site(site)?.latest().await?)
+    }
+
+    /// A list with `downloaded` set on what is already in a library.
+    fn marked(&self, mut list: Vec<SeriesSummary>) -> Result<Vec<SeriesSummary>> {
+        self.mark_downloaded(&mut list)?;
+        Ok(list)
     }
 
     pub async fn genres(&self, site: SiteId) -> Result<Vec<Genre>> {
@@ -265,7 +275,7 @@ impl Core {
         genre: &str,
         page: u32,
     ) -> Result<Vec<SeriesSummary>> {
-        Ok(self.site(site)?.by_genre(genre, page.max(1)).await?)
+        self.marked(self.site(site)?.by_genre(genre, page.max(1)).await?)
     }
 
     /// One series of the site, picked at random from its full list.
@@ -499,7 +509,11 @@ impl Core {
         let mut running = self.running();
         let download = tokio::spawn(async move {
             let saved = match core.process(&job).await {
-                Ok(path) => core.store.finish(id, &path.to_string_lossy()),
+                Ok(path) => {
+                    // The new file should show as downloaded at once.
+                    core.forget_scan();
+                    core.store.finish(id, &path.to_string_lossy())
+                }
                 Err(reason) => core.store.fail(id, &reason),
             };
             if let Err(err) = saved {
@@ -522,8 +536,22 @@ impl Core {
         let links = links.map_err(|err| err.to_string())?;
         let format = settings.output_format;
         let template = naming::effective_template(&settings);
+        // Later episodes join the folder earlier ones went to, also from older layouts.
+        let jobs = self.store.jobs().map_err(|err| err.to_string())?;
+        let existing = jobs
+            .iter()
+            .filter(|other| {
+                other.state == JobState::Done
+                    && other.episode.site == job.episode.site
+                    && other.episode.slug == job.episode.slug
+            })
+            .filter_map(|other| downloaded::series_folder(Path::new(other.path.as_deref()?)))
+            .find(|folder| folder.is_dir());
         // The name carries the language, which is only known once a link is picked.
-        let target = |language| target_path(Path::new(&job.dir), &template, job, language, format);
+        let target = |language| {
+            let dir = Path::new(&job.dir);
+            target_path(dir, &template, job, language, format, existing.as_deref())
+        };
 
         let languages = job
             .language
@@ -661,15 +689,16 @@ pub(crate) fn parse_time(at: &str) -> Option<(u32, u32)> {
     (hour < 24 && minute < 60).then_some((hour, minute))
 }
 
-/// `<dir>/Series/<Title> [imdbid-tt0388629]/Season 01/<name from the template>.<ext>`, the
-/// layout Jellyfin reads; season 0 is specials. Downloads from before IMDb IDs keep the
-/// folder without one, so a series is not split across two folders.
+/// `<dir>/<Title> [imdbid-tt0388629]/Season 01/<name from the template>.<ext>`, the layout
+/// Jellyfin reads; season 0 is specials. A series that already has a folder keeps it, also
+/// one in the `Series` folder older versions used, so a series is never split.
 fn target_path(
     dir: &Path,
     template: &str,
     job: &Job,
     language: Language,
     format: OutputFormat,
+    existing: Option<&Path>,
 ) -> PathBuf {
     let episode = &job.episode;
     // The slug is already limited to safe characters.
@@ -690,12 +719,12 @@ fn target_path(
     let file = naming::render(template, &parts)
         .or_else(|| naming::render(naming::DEFAULT_TEMPLATE, &parts))
         .unwrap_or_else(|| format!("S{:02}E{:03}", episode.season, episode.number));
-    let folder = match imdb_id {
-        Some(id) => format!("{name} [imdbid-{id}]"),
-        None => name,
+    let folder = match (existing, imdb_id) {
+        (Some(existing), _) => existing.to_owned(),
+        (None, Some(id)) => dir.join(format!("{name} [imdbid-{id}]")),
+        (None, None) => dir.join(name),
     };
-    dir.join("Series")
-        .join(folder)
+    folder
         .join(format!("Season {:02}", episode.season))
         .join(format!("{file}.{}", format.as_str()))
 }

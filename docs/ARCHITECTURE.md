@@ -45,7 +45,11 @@ Admins queue downloads directly; normal users send requests, which an admin acce
 
 ## Folder names
 
-`target_path` in `kura-core` builds `<library>/Series/<Title> [imdbid-<id>]/Season XX/`; the file name comes from the naming template (`naming.rs`), rendered per download attempt because it carries the language actually used. Each job stores its IMDb ID, so retries and Auto-Sync keep using the same folder; jobs from before IMDb IDs have none and keep the folder without one.
+`target_path` in `kura-core` builds `<library>/<Title> [imdbid-<id>]/Season XX/`, or reuses the folder an earlier episode of the series went to (also the `Series` folder of Kura 1.0 and 1.1); the file name comes from the naming template (`naming.rs`), rendered per download attempt because it carries the language actually used. Each job stores its IMDb ID, so retries and Auto-Sync keep using the same folder; jobs from before IMDb IDs have none and keep the folder without one.
+
+## Already downloaded
+
+`downloaded.rs` in `kura-core` combines finished downloads from the database with series folders found in the libraries (directly and in a legacy `Series` folder), matched by IMDb ID or by a normalised title, and episode files matched by `SxxEyy` in their names. Lists from the sites get a `downloaded` flag; title pages ask for the downloaded episodes of one series.
 
 ## Storage
 

@@ -21,7 +21,13 @@ The admin presses **Accept** or **Reject**:
 - **Accept** queues the episodes with the language and provider the user chose, into the site's default library (else the main library). Episodes that are already downloaded or queued are skipped.
 - **Reject** queues nothing.
 
-Users see on their own Request page whether a request is waiting, accepted or rejected.
+Users see on their own Request page whether a request is waiting, accepted or rejected. While nobody has decided yet, they can **Cancel** it.
+
+Admins can tidy the list with **Clear requests**: it removes accepted and rejected requests and keeps the open ones. Episodes from accepted requests stay in the queue.
+
+## Changing your password
+
+Every account, admin or user, changes its own password by clicking its name in the top bar. The current password is needed; other devices logged in with the account are logged out.
 
 ## Managing users
 

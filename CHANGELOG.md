@@ -4,6 +4,31 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-13
+
+### Library
+
+- Titles and episodes that are already downloaded show a green check: on Home at the top left of the cover, on a title's page left of every episode and per season, and in the Library next to every series folder.
+- Kura recognises downloads by its own records and by library folders with the same IMDb ID or name, so files it did not download count too.
+- New series go directly into the library folder, without the `Series` folder in between: `<library>/One Piece [imdbid-tt0388629]/Season 01/`. Series that already have a folder keep it, so nothing is split or moved.
+
+### Requests
+
+- Users can cancel their own requests while they are open.
+- Admins can clear accepted and rejected requests with **Clear requests**.
+
+### Auto-Sync
+
+- **Remove** next to a tracked title stops Auto-Sync for it.
+
+### Accounts
+
+- Every account can change its own password by clicking its name in the top bar. Other devices with the account are logged out.
+
+### Interface
+
+- The login page shows Kura centred.
+
 ## [1.1.0] - 2026-11-13
 
 ### Docker
@@ -72,6 +97,7 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/Koxility/kura/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Koxility/kura/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Koxility/kura/releases/tag/v1.0.0

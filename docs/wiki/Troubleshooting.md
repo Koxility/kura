@@ -52,6 +52,10 @@ The dialog only appears when the site has no ID. When the site has an ID, Kura a
 
 Settings → Administration → IP check shows the public address Kura uses. With Docker, Kura uses the network of its container; to route it through a VPN, run it in the network of a VPN container (`network_mode: service:vpn`).
 
+## A title does not show as downloaded
+
+Kura matches library folders by IMDb ID or by title. If the folder has neither the same `[imdbid-…]` nor the same title as the site (for example a translated name), it cannot match. Rename the folder to the site's title, or add the IMDb ID: `Name [imdbid-tt0388629]`. Changes show within 30 seconds.
+
 ## Forgot the admin password
 
 Another admin can delete and recreate the account under Settings → Users. If there is no other admin, stop Kura, move the data folder away, and start fresh; downloads on disk are not affected.

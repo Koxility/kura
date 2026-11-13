@@ -48,3 +48,16 @@ button.entry:hover {
   color: var(--text-3);
   font-size: 11px;
 }
+
+/* The name keeps its width; a long path wraps instead of squeezing it. */
+.name {
+  flex: 1 0 auto;
+  max-width: 100%;
+}
+
+.detail {
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}

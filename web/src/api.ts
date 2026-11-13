@@ -8,6 +8,8 @@ export interface SeriesSummary {
   slug: string;
   title: string;
   cover_url: string | null;
+  /** At least one episode is in a library. */
+  downloaded?: boolean;
 }
 
 export interface Series {
@@ -219,8 +221,9 @@ export const hosterNames: Record<string, string> = { voe: "VOE", vidmoly: "Vidmo
 
 export const seasonName = (season: number) => (season === 0 ? "Films" : `Season ${season}`);
 
-const two = (value: number) => String(value).padStart(2, "0");
-export const episodeCode = (season: number, number: number) => `S${two(season)}E${two(number)}`;
+/** `S01E001`, the same form as in file names. */
+export const episodeCode = (season: number, number: number) =>
+  `S${String(season).padStart(2, "0")}E${String(number).padStart(3, "0")}`;
 
 export function formatBytes(bytes: number) {
   const units = ["B", "KB", "MB", "GB", "TB"];

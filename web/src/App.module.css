@@ -94,11 +94,21 @@
   color: var(--text);
 }
 
+/* The user name opens the password change. */
 .user {
-  padding: 0 4px 0 12px;
+  padding: 6px 4px 6px 12px;
+  border: 0;
+  background: transparent;
   color: var(--text-3);
+  font: inherit;
   font-size: var(--size-s);
   white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--fast);
+}
+
+.user:hover {
+  color: var(--text);
 }
 
 .main {

@@ -56,16 +56,7 @@ impl Core {
             hash(password).await?;
             return Ok(None);
         };
-        let password = password.to_owned();
-        let matches = tokio::task::spawn_blocking(move || {
-            Argon2::default()
-                .verify_password(password.as_bytes(), stored.as_str())
-                .is_ok()
-        });
-        if !matches
-            .await
-            .map_err(|err| CoreError::Hashing(err.to_string()))?
-        {
+        if !verify(password, stored).await? {
             return Ok(None);
         }
 
@@ -81,6 +72,28 @@ impl Core {
     /// The user a session token belongs to, while the session is valid.
     pub fn session(&self, token: &str) -> Result<Option<User>> {
         Ok(self.store.session_user(&token_hash(token), now())?)
+    }
+
+    /// Changes `user`'s password after checking the current one. Other sessions of the user
+    /// end; the one in `token` stays. Returns `false` when the current password is wrong.
+    pub async fn change_password(
+        &self,
+        user: &User,
+        token: &str,
+        current: &str,
+        new: &str,
+    ) -> Result<bool> {
+        check(&user.name, new)?;
+        let Some((_, stored)) = self.store.credentials(&user.name)? else {
+            return Ok(false);
+        };
+        if !verify(current, stored).await? {
+            return Ok(false);
+        }
+        let hashed = hash(new).await?;
+        self.store
+            .set_password(user.id, &hashed, &token_hash(token))?;
+        Ok(true)
     }
 
     pub fn logout(&self, token: &str) -> Result<()> {
@@ -101,6 +114,19 @@ fn check<'a>(name: &'a str, password: &str) -> Result<&'a str> {
         ));
     }
     Ok(name)
+}
+
+/// Checking takes tens of milliseconds, so it runs off the async threads.
+async fn verify(password: &str, stored: String) -> Result<bool> {
+    let password = password.to_owned();
+    let matches = tokio::task::spawn_blocking(move || {
+        Argon2::default()
+            .verify_password(password.as_bytes(), stored.as_str())
+            .is_ok()
+    });
+    matches
+        .await
+        .map_err(|err| CoreError::Hashing(err.to_string()))
 }
 
 /// Hashing takes tens of milliseconds, so it runs off the async threads.
@@ -177,6 +203,27 @@ mod tests {
         assert_eq!(core.session("not a token").unwrap(), None);
         core.logout(&token).unwrap();
         assert_eq!(core.session(&token).unwrap(), None);
+
+        // Changing the password needs the current one and keeps only this session.
+        let (_, other) = core.login("admin", "correct horse").await.unwrap().unwrap();
+        let (_, here) = core.login("admin", "correct horse").await.unwrap().unwrap();
+        let wrong = core.change_password(&user, &here, "wrong horse", "new horse 1");
+        assert!(!wrong.await.unwrap());
+        let short = core
+            .change_password(&user, &here, "correct horse", "short")
+            .await;
+        assert!(matches!(short, Err(CoreError::Invalid(_))));
+        let changed = core.change_password(&user, &here, "correct horse", "new horse 1");
+        assert!(changed.await.unwrap());
+        assert!(core.session(&here).unwrap().is_some());
+        assert!(core.session(&other).unwrap().is_none());
+        assert!(
+            core.login("admin", "correct horse")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(core.login("admin", "new horse 1").await.unwrap().is_some());
 
         let taken = core.create_user("ADMIN", "correct horse", Role::User).await;
         assert!(taken.unwrap().is_none());

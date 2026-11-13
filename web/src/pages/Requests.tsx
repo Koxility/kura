@@ -28,9 +28,10 @@ const stateStyles: Record<RequestState, string> = {
 export function Requests({ admin }: { admin: boolean }) {
   const requests = useQuery(requestsQuery);
   const decide = useMutation({
-    mutationFn: ({ id, accept }: { id: number; accept: boolean }) =>
-      api(`/requests/${id}/${accept ? "accept" : "reject"}`, "POST"),
+    mutationFn: ({ id, action }: { id: number; action: "accept" | "reject" | "cancel" }) =>
+      api(`/requests/${id}/${action}`, "POST"),
   });
+  const clear = useMutation({ mutationFn: () => api("/requests/clear", "POST") });
   const list = requests.data ?? [];
   const open = list.filter((request) => request.state === "open");
   const decided = list.filter((request) => request.state !== "open");
@@ -43,9 +44,9 @@ export function Requests({ admin }: { admin: boolean }) {
           ? "Accepted requests go to the queue, into the site's default library."
           : "Ask for a title on its page. An admin accepts or rejects it."}
       </p>
-      {(requests.error ?? decide.error) && (
+      {(requests.error ?? decide.error ?? clear.error) && (
         <p className={ui.error} role="alert">
-          {(requests.error ?? decide.error)?.message}
+          {(requests.error ?? decide.error ?? clear.error)?.message}
         </p>
       )}
       {requests.isSuccess && list.length === 0 && (
@@ -58,6 +59,17 @@ export function Requests({ admin }: { admin: boolean }) {
           <ul className={ui.list}>
             {open.map((request) => (
               <Row key={request.id} request={request} admin={admin}>
+                {!admin && (
+                  <button
+                    type="button"
+                    className={ui.ghost}
+                    disabled={decide.isPending}
+                    aria-label={`Cancel the request for ${request.series_title}`}
+                    onClick={() => decide.mutate({ id: request.id, action: "cancel" })}
+                  >
+                    Cancel
+                  </button>
+                )}
                 {admin && (
                   <>
                     <button
@@ -65,7 +77,7 @@ export function Requests({ admin }: { admin: boolean }) {
                       className={ui.ghost}
                       disabled={decide.isPending}
                       aria-label={`Reject ${request.series_title} for ${request.user_name}`}
-                      onClick={() => decide.mutate({ id: request.id, accept: false })}
+                      onClick={() => decide.mutate({ id: request.id, action: "reject" })}
                     >
                       Reject
                     </button>
@@ -74,7 +86,7 @@ export function Requests({ admin }: { admin: boolean }) {
                       className={ui.primary}
                       disabled={decide.isPending}
                       aria-label={`Accept ${request.series_title} for ${request.user_name}`}
-                      onClick={() => decide.mutate({ id: request.id, accept: true })}
+                      onClick={() => decide.mutate({ id: request.id, action: "accept" })}
                     >
                       Accept
                     </button>
@@ -89,6 +101,18 @@ export function Requests({ admin }: { admin: boolean }) {
       {decided.length > 0 && (
         <>
           <h2 className={ui.section}>Decided</h2>
+          {admin && (
+            <div className={ui.toolbar}>
+              <button
+                type="button"
+                className={ui.button}
+                disabled={clear.isPending}
+                onClick={() => clear.mutate()}
+              >
+                Clear requests
+              </button>
+            </div>
+          )}
           <ul className={ui.list}>
             {decided.map((request) => (
               <Row key={request.id} request={request} admin={admin} />
@@ -125,10 +149,12 @@ function Row({
         <p className={`${ui.muted} ${ui.small}`}>{details.join(" · ")}</p>
       </div>
       {/* Admins act on open requests; everyone else sees where it stands. */}
-      {admin && request.state === "open" ? (
+      {/* Open requests: admins decide, the user who asked can still cancel. */}
+      {!admin && <span className={stateStyles[request.state]}>{stateNames[request.state]}</span>}
+      {request.state === "open" ? (
         children
       ) : (
-        <span className={stateStyles[request.state]}>{stateNames[request.state]}</span>
+        admin && <span className={stateStyles[request.state]}>{stateNames[request.state]}</span>
       )}
     </li>
   );
