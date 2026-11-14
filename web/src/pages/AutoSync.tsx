@@ -26,6 +26,14 @@ export function AutoSyncPage() {
     },
   });
 
+  const remove = useMutation({
+    mutationFn: (title: TitleRef) => api("/autosync/remove", "POST", title),
+    onSettled: () => {
+      client.invalidateQueries({ queryKey: ["settings"] });
+      client.invalidateQueries({ queryKey: ["autosync"] });
+    },
+  });
+
   const syncNow = useMutation({
     mutationFn: () => api<{ queued: number }>("/autosync/run", "POST"),
     onSettled: () => {
@@ -80,18 +88,16 @@ export function AutoSyncPage() {
           </Link>
         </p>
       )}
-      {(status.error ?? exclude.error) && (
+      {(status.error ?? exclude.error ?? remove.error) && (
         <p className={ui.error} role="alert">
-          {(status.error ?? exclude.error)?.message}
+          {(status.error ?? exclude.error ?? remove.error)?.message}
         </p>
       )}
 
       <h2 className={ui.section}>Tracked titles</h2>
       {status.isSuccess && tracked.length === 0 && (
         <p className={ui.notice}>
-          {excluded.length > 0
-            ? "No title is tracked. Removed titles are listed under Exclude titles."
-            : "Nothing is tracked yet. A title is tracked once one of its episodes is downloaded."}
+          Nothing is tracked. A title is tracked once one of its episodes is downloaded.
         </p>
       )}
       <ul className={ui.list}>
@@ -111,15 +117,10 @@ export function AutoSyncPage() {
             <button
               type="button"
               className={ui.ghost}
-              disabled={exclude.isPending}
-              title="Stop checking this title. It moves to the excluded titles below."
+              disabled={remove.isPending}
+              title="Stop checking this title. It is tracked again once another episode of it is downloaded."
               aria-label={`Remove ${title.title} from Auto-Sync`}
-              onClick={() =>
-                exclude.mutate({
-                  title: { site: title.site, slug: title.slug, title: title.title },
-                  excluded: true,
-                })
-              }
+              onClick={() => remove.mutate({ site: title.site, slug: title.slug, title: title.title })}
             >
               Remove
             </button>

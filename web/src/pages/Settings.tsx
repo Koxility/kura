@@ -90,7 +90,8 @@ function SettingsForm({
       // this form was opened.
       const newest = client.getQueryData<Settings>(settingsQuery.queryKey);
       const excluded = newest?.auto_sync.excluded ?? settings.auto_sync.excluded;
-      const merged = { ...settings, auto_sync: { ...settings.auto_sync, excluded } };
+      const removed = newest?.auto_sync.removed ?? settings.auto_sync.removed;
+      const merged = { ...settings, auto_sync: { ...settings.auto_sync, excluded, removed } };
       return api<Settings>("/settings", "PUT", merged);
     },
     onSuccess: (saved) => {

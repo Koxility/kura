@@ -109,6 +109,32 @@ pub fn language_name(language: Language) -> &'static str {
     }
 }
 
+/// The language a file name carries, as `{language}` writes it: `One Piece S01E001 German
+/// Dub.mkv` is German dub. Case and separators do not matter. Plain `English` only counts as
+/// the last word, so a title like `English Teacher` is not taken for one.
+pub fn language_in(name: &str) -> Option<Language> {
+    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+    let words: Vec<String> = stem
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect();
+    let pairs = [
+        (Language::GermanDub, ["german", "dub"]),
+        (Language::GermanSub, ["german", "sub"]),
+        (Language::EnglishSub, ["english", "sub"]),
+    ];
+    let found = pairs.into_iter().find(|(_, pair)| {
+        words
+            .windows(2)
+            .any(|window| window[0] == pair[0] && window[1] == pair[1])
+    });
+    match found {
+        Some((language, _)) => Some(language),
+        None => (words.last().map(String::as_str) == Some("english")).then_some(Language::English),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +186,34 @@ mod tests {
             render("{title}/{episodenumber}", &sneaky).as_deref(),
             Some("etc Re Zero S01E001")
         );
+    }
+
+    #[test]
+    fn the_language_is_read_back_from_a_file_name() {
+        for language in [
+            Language::GermanDub,
+            Language::GermanSub,
+            Language::EnglishSub,
+            Language::English,
+        ] {
+            let name = render(
+                DEFAULT_TEMPLATE,
+                &NameParts {
+                    language,
+                    ..parts(1, 1)
+                },
+            );
+            assert_eq!(
+                language_in(&format!("{}.mkv", name.unwrap())),
+                Some(language)
+            );
+        }
+        assert_eq!(
+            language_in("show.s01e02.german.dub.mp4"),
+            Some(Language::GermanDub)
+        );
+        assert_eq!(language_in("English Teacher S01E01.mkv"), None);
+        assert_eq!(language_in("One Piece S01E001.mkv"), None);
     }
 
     #[test]

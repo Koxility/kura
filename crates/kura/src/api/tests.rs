@@ -188,6 +188,9 @@ async fn settings_and_users_are_for_admins() {
     let excluded = json!({ "site": "aniworld", "slug": "x", "title": "X", "excluded": true });
     let denied = server.call(Method::POST, "/autosync/exclude", &user, excluded);
     assert_eq!(denied.await.0, 403);
+    let title = json!({ "site": "aniworld", "slug": "x", "title": "X" });
+    let denied = server.call(Method::POST, "/autosync/remove", &user, title);
+    assert_eq!(denied.await.0, 403);
     assert_eq!(server.get("/queue", &user).await.0, 200);
     // Every account changes its own password.
     let wrong = json!({ "current": "nope", "new": "another horse" });
@@ -281,6 +284,15 @@ async fn bad_requests_get_clear_answers() {
     assert_eq!(excluded.await.0, 204);
     let (_, settings) = server.get("/settings", &admin).await;
     assert_eq!(settings["auto_sync"]["excluded"][0]["slug"], "x");
+    let title = json!({ "site": "aniworld", "slug": "y", "title": "Y" });
+    let removed = server.call(Method::POST, "/autosync/remove", &admin, title);
+    assert_eq!(removed.await.0, 204);
+    let (_, settings) = server.get("/settings", &admin).await;
+    assert_eq!(settings["auto_sync"]["removed"][0]["slug"], "y");
+    assert_eq!(
+        settings["auto_sync"]["excluded"].as_array().unwrap().len(),
+        1
+    );
     let synced = server.call(Method::POST, "/autosync/run", &admin, Value::Null);
     assert_eq!(synced.await, (200, json!({ "queued": 0 })));
     let (_, sync) = server.get("/autosync", &admin).await;

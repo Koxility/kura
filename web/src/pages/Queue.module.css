@@ -23,9 +23,13 @@
   cursor: pointer;
 }
 
+/* One line, however many episodes run at once; the full text is in the tooltip. */
 .summary {
   margin: 2px 0 0;
+  overflow: hidden;
   font-size: var(--size-s);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The episodes of an opened title, indented under it. */

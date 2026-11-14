@@ -90,16 +90,26 @@ impl Core {
         Ok(total)
     }
 
-    /// Queues the episodes of one title that are not known yet, with the choices of its most
-    /// recent download.
+    /// Queues the episodes of one title that are neither queued before nor in the library,
+    /// in the language of the newest downloaded episode and with the other choices of its
+    /// most recent download. Episodes not offered in that language wait for a later run.
     async fn sync_title(&self, auto: &AutoSync, jobs: &[Job], title: &TitleRef) -> Result<usize> {
-        let pair = |job: &Job| (job.episode.season, job.episode.number);
-        let known: Vec<_> = of_title(jobs, title).map(pair).collect();
-        let newest = done(jobs, title).map(pair).max();
-        let last = of_title(jobs, title).max_by_key(|job| job.queued_at);
-        let (Some(newest), Some(last)) = (newest, last) else {
+        let Some(last) = of_title(jobs, title).max_by_key(|job| job.queued_at) else {
             return Ok(0);
         };
+        // Files in the library count too, also ones Kura did not download.
+        let imdb_id = last.imdb_id.as_deref();
+        let found =
+            self.downloaded_with_language(title.site, &title.slug, &title.title, imdb_id)?;
+        let pair = |job: &Job| (job.episode.season, job.episode.number);
+        let mut known: Vec<_> = of_title(jobs, title).map(pair).collect();
+        known.extend(found.iter().map(|(pair, _)| *pair));
+        let Some(newest) = found.iter().map(|(pair, _)| *pair).max() else {
+            return Ok(0);
+        };
+        // Sorted by episode, so the last known language is the newest one's.
+        let language = found.iter().rev().find_map(|(_, language)| *language);
+        let language = language.or(last.language);
 
         let site = self.site(title.site)?;
         let series = site.series(&title.slug).await?;
@@ -112,6 +122,7 @@ impl Core {
             let listed = site.episodes(&title.slug, season).await?;
             let listed: Vec<_> = listed
                 .iter()
+                .filter(|episode| language.is_none_or(|wanted| episode.languages.contains(&wanted)))
                 .map(|episode| (season, episode.number))
                 .collect();
             for (season, number) in missing(&known, &listed, auto.only_new.then_some(newest)) {
@@ -125,7 +136,8 @@ impl Core {
                     episode: &episode,
                     series_title: &series.summary.title,
                     user_id: None,
-                    language: last.language,
+                    // Exactly this language: no fallback to another one in the settings.
+                    language,
                     hoster: last.hoster.as_deref(),
                     dir: &last.dir,
                     imdb_id: last.imdb_id.as_deref(),
@@ -181,15 +193,28 @@ fn done<'a>(jobs: &'a [Job], title: &'a TitleRef) -> impl Iterator<Item = &'a Jo
     of_title(jobs, title).filter(|job| job.state == JobState::Done)
 }
 
-/// Series with at least one downloaded episode, minus excluded titles and disabled sites,
-/// by title.
+/// Series with at least one downloaded episode, minus excluded titles, disabled sites and
+/// titles removed since their last download, by title.
 fn tracked(settings: &Settings, jobs: &[Job]) -> Vec<TitleRef> {
     let mut titles: Vec<TitleRef> = Vec::new();
-    for job in jobs.iter().filter(|job| job.state == JobState::Done) {
+    let done: Vec<&Job> = jobs
+        .iter()
+        .filter(|job| job.state == JobState::Done)
+        .collect();
+    for job in &done {
         let (site, slug) = (job.episode.site, &job.episode.slug);
         let is_it = |title: &TitleRef| title.site == site && title.slug == *slug;
+        let removed = settings.auto_sync.removed.iter().any(|removed| {
+            is_it(&removed.title)
+                && !done.iter().any(|other| {
+                    other.episode.site == site
+                        && other.episode.slug == *slug
+                        && other.queued_at > removed.at
+                })
+        });
         let skipped = settings.disabled_sites.contains(&site)
             || settings.auto_sync.excluded.iter().any(is_it)
+            || removed
             || titles.iter().any(is_it);
         if !skipped {
             titles.push(TitleRef {
@@ -252,6 +277,54 @@ mod tests {
         assert_eq!(missing(&known, &listed, None), [(1, 1), (1, 4)]);
         // A new season counts as later than any episode of the one before.
         assert_eq!(missing(&known, &[(2, 1)], Some((1, 3))), [(2, 1)]);
+    }
+
+    fn done_job(slug: &str, queued_at: i64) -> Job {
+        Job {
+            id: queued_at,
+            episode: EpisodeId {
+                site: SiteId::AniWorld,
+                slug: slug.to_owned(),
+                season: 1,
+                number: 1,
+            },
+            series_title: slug.to_owned(),
+            state: JobState::Done,
+            progress: 1.0,
+            error: None,
+            path: None,
+            language: None,
+            hoster: None,
+            dir: String::new(),
+            hidden: false,
+            queued_at,
+            imdb_id: None,
+        }
+    }
+
+    #[test]
+    fn removed_titles_come_back_with_the_next_download() {
+        let mut settings = Settings::default();
+        settings.auto_sync.removed.push(kura_domain::RemovedTitle {
+            title: TitleRef {
+                site: SiteId::AniWorld,
+                slug: "a".to_owned(),
+                title: "a".to_owned(),
+            },
+            at: 100,
+        });
+        let slugs = |jobs: &[Job]| {
+            let titles = tracked(&settings, jobs);
+            titles
+                .into_iter()
+                .map(|title| title.slug)
+                .collect::<Vec<_>>()
+        };
+        let before = [done_job("a", 50), done_job("b", 60)];
+        assert_eq!(slugs(&before), ["b"]);
+        // Removed, not excluded: a later download tracks it again.
+        assert_eq!(slugs(&[done_job("a", 50), done_job("a", 150)]), ["a"]);
+        assert!(settings.auto_sync.excluded.is_empty());
     }
 
     #[test]

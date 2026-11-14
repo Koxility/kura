@@ -252,6 +252,17 @@ pub struct AutoSync {
     pub schedule: Schedule,
     /// Titles Auto-Sync leaves alone.
     pub excluded: Vec<TitleRef>,
+    /// Titles taken off the tracked list. One is tracked again once an episode of it is
+    /// queued after it was removed.
+    pub removed: Vec<RemovedTitle>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RemovedTitle {
+    #[serde(flatten)]
+    pub title: TitleRef,
+    /// Unix seconds.
+    pub at: i64,
 }
 
 impl Default for AutoSync {
@@ -261,6 +272,7 @@ impl Default for AutoSync {
             only_new: true,
             schedule: Schedule::Every { minutes: 60 },
             excluded: Vec::new(),
+            removed: Vec::new(),
         }
     }
 }
