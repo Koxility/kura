@@ -34,8 +34,9 @@ impl Core {
         Ok(roots.collect())
     }
 
-    /// What is inside `relative`, a folder below one of the roots: folders first, then files,
-    /// each by name. A folder that does not exist yet is empty.
+    /// What is inside `relative`, a folder below one of the roots: folders first, then the
+    /// `.mkv` and `.mp4` files, each by name. Other files (posters, subtitles, metadata) are
+    /// left out. A folder that does not exist yet is empty.
     pub fn browse(&self, root: usize, relative: &str) -> Result<Vec<Entry>> {
         let outside = CoreError::Invalid("this is not a folder inside the library");
         let unreadable = |_| CoreError::Invalid("this folder cannot be read");
@@ -73,6 +74,9 @@ impl Core {
             let Ok(metadata) = std::fs::metadata(entry.path()) else {
                 continue;
             };
+            if !metadata.is_dir() && !is_video(&name) {
+                continue;
+            }
             entries.push(Entry {
                 name,
                 folder: metadata.is_dir(),
@@ -82,4 +86,14 @@ impl Core {
         entries.sort_by(|a, b| b.folder.cmp(&a.folder).then_with(|| a.name.cmp(&b.name)));
         Ok(entries)
     }
+}
+
+/// Files the Library page shows.
+const SHOWN: [&str; 2] = ["mkv", "mp4"];
+
+fn is_video(name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| SHOWN.contains(&ext.to_ascii_lowercase().as_str()))
 }

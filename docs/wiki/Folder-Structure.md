@@ -34,7 +34,7 @@ It recognises a series by
 - a folder in any library whose name carries the same IMDb ID (`[imdbid-tt0388629]`), or
 - a folder whose name is the same title, ignoring case, punctuation and the `[imdbid-…]` part.
 
-Inside a matching folder, every video file with `S01E001`, `S1E1` or similar in its name counts as that episode. So a library filled by hand or by another tool is recognised too. Libraries are read at most every 30 seconds.
+Inside a matching folder, every video file with `S01E001`, `S1E1` or similar in its name counts as that episode. So a library filled by hand or by another tool is recognised too. Libraries are read again every 5 minutes, before every Auto-Sync run and whenever a title's page is opened. A deleted file no longer counts, and a folder without episode files does not count either.
 
 ## IMDb IDs
 

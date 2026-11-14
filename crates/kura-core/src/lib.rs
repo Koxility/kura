@@ -11,7 +11,7 @@ mod requests;
 mod sync;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration, Instant},
@@ -159,9 +159,10 @@ pub struct Core {
     /// Series folders found in the libraries, kept for a moment.
     scan: Mutex<Option<downloaded::Scan>>,
     /// Series a title page found downloaded episodes for, also by IMDb ID, so lists mark them.
+    /// Checked again with every library scan, so deleted series drop out.
     // shortcut: in memory, a series matched only by IMDb ID is marked in lists once its page
     // was opened since the start; store it if that is not enough.
-    found: Mutex<HashSet<(SiteId, String)>>,
+    found: Mutex<downloaded::FoundTitles>,
 }
 
 /// When a site's full list was fetched, and the list.

@@ -1,3 +1,8 @@
+use std::{
+    collections::HashMap,
+    sync::{Mutex, PoisonError},
+};
+
 use async_trait::async_trait;
 use kura_domain::{Episode, EpisodeId, Genre, HosterLink, Language, Series, SeriesSummary, SiteId};
 use scraper::Html;
@@ -11,14 +16,66 @@ use crate::{
 const BASE: &str = "https://aniworld.to";
 const SERIES: &str = "/anime/stream/";
 
+/// The search sends no covers, so this many hits get theirs from their series page.
+const COVER_LOOKUPS: usize = 24;
+
 pub struct AniWorld {
     http: reqwest::Client,
+    /// Covers read from series pages, by slug, so a search again needs no page.
+    covers: Mutex<HashMap<String, String>>,
 }
 
 impl AniWorld {
     pub fn new(http: reqwest::Client) -> Self {
-        Self { http }
+        Self {
+            http,
+            covers: Mutex::default(),
+        }
     }
+
+    /// Fills in the covers of the first hits from the cache, or from their series pages,
+    /// all at once. A page that fails leaves its hit without a cover.
+    async fn add_covers(&self, list: &mut [SeriesSummary]) {
+        let missing = {
+            let covers = self.covers.lock().unwrap_or_else(PoisonError::into_inner);
+            covers_from(&covers, list)
+        };
+        let lookups: Vec<_> = missing
+            .into_iter()
+            .map(|index| {
+                let http = self.http.clone();
+                let slug = list[index].slug.clone();
+                let page = tokio::spawn(async move {
+                    let html = get(&http, &format!("{BASE}{SERIES}{slug}")).await.ok()?;
+                    parse_series(&slug, &html).ok()?.summary.cover_url
+                });
+                (index, page)
+            })
+            .collect();
+        for (index, page) in lookups {
+            if let Ok(Some(cover)) = page.await {
+                let mut covers = self.covers.lock().unwrap_or_else(PoisonError::into_inner);
+                covers.insert(list[index].slug.clone(), cover.clone());
+                list[index].cover_url = Some(cover);
+            }
+        }
+    }
+}
+
+/// Sets the covers the cache knows and returns the places of the first hits still without
+/// one.
+fn covers_from(covers: &HashMap<String, String>, list: &mut [SeriesSummary]) -> Vec<usize> {
+    let mut missing = Vec::new();
+    for (index, series) in list.iter_mut().enumerate().take(COVER_LOOKUPS) {
+        if series.cover_url.is_some() {
+            continue;
+        }
+        match covers.get(&series.slug) {
+            Some(cover) => series.cover_url = Some(cover.clone()),
+            None => missing.push(index),
+        }
+    }
+    missing
 }
 
 #[async_trait]
@@ -37,7 +94,9 @@ impl Site for AniWorld {
             .error_for_status()?
             .json()
             .await?;
-        Ok(parse_search(hits))
+        let mut found = parse_search(hits);
+        self.add_covers(&mut found).await;
+        Ok(found)
     }
 
     async fn popular(&self) -> Result<Vec<SeriesSummary>> {
@@ -116,7 +175,7 @@ struct Hit {
 }
 
 /// The search also returns episodes and help pages; only links to a series page are kept.
-/// It sends no covers.
+/// It sends no covers; [`AniWorld::add_covers`] adds them.
 fn parse_search(hits: Vec<Hit>) -> Vec<SeriesSummary> {
     hits.into_iter()
         .filter_map(|hit| {
@@ -217,7 +276,10 @@ fn parse_series(slug: &str, html: &str) -> Result<Series> {
             site: SiteId::AniWorld,
             slug: slug.to_owned(),
             title,
+            // Lazy-loaded on most pages, plain on some.
             cover_url: first_attr(root, ".seriesCoverBox img", "data-src")
+                .or_else(|| first_attr(root, ".seriesCoverBox img", "src"))
+                .filter(|path| !path.starts_with("data:"))
                 .map(|path| absolute(BASE, path)),
         },
         description: first_attr(root, "p.seri_des", "data-full-description")
@@ -304,6 +366,17 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn search_hits_take_known_covers_and_list_the_rest() {
+        let hits = serde_json::from_str(include_str!("../fixtures/aniworld_search.json")).unwrap();
+        let mut found = parse_search(hits);
+        let cover = "https://aniworld.to/public/img/cover/lantern-road_220x330.jpg";
+        let covers = HashMap::from([("lantern-road".to_owned(), cover.to_owned())]);
+        assert_eq!(covers_from(&covers, &mut found), [1]);
+        assert_eq!(found[0].cover_url.as_deref(), Some(cover));
+        assert_eq!(found[1].cover_url, None);
     }
 
     #[test]

@@ -66,6 +66,8 @@ impl Core {
 
     /// Checks every tracked title once and returns how many episodes were queued.
     pub async fn sync_once(&self) -> Result<usize> {
+        // What is in the library now, not what was there at the last scan.
+        self.forget_scan();
         let settings = self.store.settings()?;
         let jobs = self.store.jobs()?;
         let mut total = 0;
