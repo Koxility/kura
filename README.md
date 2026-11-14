@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="web/public/kura.png" width="104" alt="Kura logo">
+<img src="web/public/kura-big.png" width="200" alt="Kura logo">
 
 # Kura
 
