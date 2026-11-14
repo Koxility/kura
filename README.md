@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="web/public/kura.png" width="104" alt="Kura logo">
+
 # Kura
 
 **Download anime and series from AniWorld and SerienStream. Your library stays Jellyfin-ready.**

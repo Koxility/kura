@@ -4,6 +4,12 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-11-15
+
+### Added
+
+- Kura has a logo. It shows in the browser tab, in bookmarks and favourites, and in the README.
+
 ## [1.2.3] - 2026-11-14
 
 ### Fixed
@@ -121,7 +127,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.3...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.4...HEAD
+[1.2.4]: https://github.com/Koxility/kura/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/Koxility/kura/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/Koxility/kura/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/Koxility/kura/compare/v1.2.0...v1.2.1
