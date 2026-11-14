@@ -4,6 +4,14 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-11-14
+
+### Fixed
+
+- Deleted episodes no longer show as downloaded. A finished download counts only while its file is still there, and a series folder only while it holds episode files. Kura reads the libraries again every 5 minutes, before every Auto-Sync run and whenever a title's page is opened, instead of trusting what it saw earlier. Auto-Sync still does not download a deleted episode again.
+- The Library page shows only folders and `.mkv` and `.mp4` files; posters, subtitles, `.nfo` and other files are left out.
+- AniWorld search results show covers. The search sends none, so Kura takes them from the series pages and remembers them.
+
 ## [1.2.2] - 2026-11-14
 
 ### Fixed
@@ -113,7 +121,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/Koxility/kura/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/Koxility/kura/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/Koxility/kura/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Koxility/kura/compare/v1.1.0...v1.2.0

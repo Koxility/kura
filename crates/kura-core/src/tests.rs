@@ -901,6 +901,16 @@ async fn the_library_view_stays_inside_its_folders() {
     std::fs::write(season.join("Show - S01E01.mkv"), b"12345").unwrap();
     std::fs::write(season.join("Show - S01E02.mkv.part"), b"1").unwrap();
     std::fs::write(season.join(".hidden"), b"1").unwrap();
+    std::fs::write(season.join("Show - S01E02.MP4"), b"123").unwrap();
+    for other in [
+        "poster.jpg",
+        "Show - S01E01.nfo",
+        "Show - S01E01.de.srt",
+        "notes.txt",
+    ] {
+        std::fs::write(season.join(other), b"1").unwrap();
+    }
+    std::fs::create_dir_all(season.join("extras")).unwrap();
     #[cfg(unix)]
     std::os::unix::fs::symlink("/", dir.path().join("escape")).unwrap();
 
@@ -923,12 +933,20 @@ async fn the_library_view_stays_inside_its_folders() {
             .any(|entry| entry.name == "Series" && entry.folder)
     );
     let files = s.core.browse(0, "Series/Show/Season 01").unwrap();
-    let file = Entry {
-        name: "Show - S01E01.mkv".to_owned(),
-        folder: false,
-        size: 5,
+    let entry = |name: &str, folder, size| Entry {
+        name: name.to_owned(),
+        folder,
+        size,
     };
-    assert_eq!(files, [file]);
+    // Folders and video files only: no posters, subtitles or metadata.
+    assert_eq!(
+        files,
+        [
+            entry("extras", true, 0),
+            entry("Show - S01E01.mkv", false, 5),
+            entry("Show - S01E02.MP4", false, 3),
+        ]
+    );
 
     // Not there yet is empty, not an error.
     assert!(s.core.browse(0, "Series/Other").unwrap().is_empty());
@@ -1042,4 +1060,52 @@ async fn downloaded_titles_and_episodes_are_found_by_database_id_and_name() {
     s.core.mark_downloaded(&mut list).unwrap();
     let marks: Vec<_> = list.iter().map(|series| series.downloaded).collect();
     assert_eq!(marks, [true, true, false]);
+}
+
+#[tokio::test]
+async fn deleted_files_are_no_longer_downloaded() {
+    let s = setup(vec![link(Language::GermanDub, "voe", "https://voe/x")], 1);
+    s.queue(first(), Choices::default()).await.unwrap();
+    let jobs = states(&s.core, &[JobState::Done]).await;
+    // A series only found by its IMDb ID on its page.
+    let by_id = s.path("main/Whatever Name [imdbid-tt7654321]/Season 01");
+    std::fs::create_dir_all(&by_id).unwrap();
+    std::fs::write(by_id.join("x S01E002.mkv"), b"").unwrap();
+
+    let episodes = |slug, title, imdb| {
+        s.core
+            .downloaded_episodes(SiteId::AniWorld, slug, title, imdb)
+            .unwrap()
+    };
+    let summary = |slug: &str, title: &str| SeriesSummary {
+        downloaded: false,
+        site: SiteId::AniWorld,
+        slug: slug.to_owned(),
+        title: title.to_owned(),
+        cover_url: None,
+    };
+    let marks = || {
+        let mut list = vec![
+            summary("lantern-road", "Renamed On The Site"),
+            summary("other", "Any Title"),
+        ];
+        s.core.mark_downloaded(&mut list).unwrap();
+        list.iter()
+            .map(|series| series.downloaded)
+            .collect::<Vec<_>>()
+    };
+    s.core.forget_scan();
+    assert_eq!(episodes("other", "Any Title", Some("tt7654321")), [(1, 2)]);
+    assert_eq!(marks(), [true, true]);
+
+    // Both files are deleted; the folders stay.
+    std::fs::remove_file(jobs[0].path.as_deref().unwrap()).unwrap();
+    std::fs::remove_file(by_id.join("x S01E002.mkv")).unwrap();
+    s.core.refresh_downloaded().unwrap();
+    assert_eq!(marks(), [false, false]);
+    assert!(episodes("lantern-road", "Lantern Road", Some("tt0388629")).is_empty());
+    assert!(episodes("other", "Any Title", Some("tt7654321")).is_empty());
+
+    // Auto-Sync does not download a deleted episode again.
+    assert_eq!(s.core.sync_once().await.unwrap(), 0);
 }

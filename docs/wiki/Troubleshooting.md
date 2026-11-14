@@ -54,7 +54,7 @@ Settings → Administration → IP check shows the public address Kura uses. Wit
 
 ## A title does not show as downloaded
 
-Kura matches library folders by IMDb ID or by title. If the folder has neither the same `[imdbid-…]` nor the same title as the site (for example a translated name), it cannot match. Rename the folder to the site's title, or add the IMDb ID: `Name [imdbid-tt0388629]`. Changes show within 30 seconds.
+Kura matches library folders by IMDb ID or by title. If the folder has neither the same `[imdbid-…]` nor the same title as the site (for example a translated name), it cannot match. Rename the folder to the site's title, or add the IMDb ID: `Name [imdbid-tt0388629]`. Changes show at once on the title's page and within 5 minutes in lists.
 
 ## Forgot the admin password
 

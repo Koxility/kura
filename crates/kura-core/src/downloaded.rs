@@ -2,20 +2,28 @@
 //! in the libraries, matched by IMDb ID or by name. Folders count even when Kura did not
 //! create them, so a library filled by hand or by another tool is recognised too. File names
 //! also tell the language an episode is in.
+//!
+//! Nothing here is trusted for long: a finished download counts only while its file is still
+//! there, a folder only while it holds episodes, and the libraries are read again every few
+//! minutes, before every Auto-Sync run and whenever a title's page is opened.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{Arc, PoisonError},
     time::{Duration, Instant},
 };
 
-use kura_domain::{JobState, Language, SeriesSummary, SiteId};
+use kura_domain::{Job, JobState, Language, SeriesSummary, SiteId};
 
 use crate::{Core, Result, naming::language_in};
 
-/// Library folders are read at most this often; pages ask for every list they show.
-const SCAN_EVERY: Duration = Duration::from_secs(30);
+/// Library folders are read at most this often for lists; pages ask for every list they
+/// show. A title's page and Auto-Sync always read them again.
+const SCAN_EVERY: Duration = Duration::from_secs(5 * 60);
+
+/// How often the background check looks for files that were added or deleted.
+pub const RESCAN_EVERY: Duration = Duration::from_secs(5 * 60);
 
 const VIDEO: [&str; 6] = ["mkv", "mp4", "m4v", "avi", "webm", "ts"];
 
@@ -25,9 +33,21 @@ pub(crate) struct TitleFolder {
     path: PathBuf,
     key: String,
     imdb_id: Option<String>,
+    /// Whether any episode file is in it; an emptied folder is not a download.
+    has_episodes: bool,
 }
 
-pub(crate) type Scan = (Instant, Arc<Vec<TitleFolder>>);
+/// What one read of the libraries found.
+pub(crate) struct Scan {
+    at: Instant,
+    folders: Arc<Vec<TitleFolder>>,
+    /// Series with a finished download whose file is still there.
+    on_disk: Arc<HashSet<(SiteId, String)>>,
+}
+
+/// Series a title page found downloaded episodes for, with the title and IMDb ID it was
+/// checked with, so the background check can check it again.
+pub(crate) type FoundTitles = HashMap<(SiteId, String), (String, Option<String>)>;
 
 /// A downloaded `(season, episode)` and its language, when the record or file name tells it.
 pub(crate) type Found = ((u32, u32), Option<Language>);
@@ -36,19 +56,18 @@ impl Core {
     /// Sets `downloaded` on every series of which at least one episode is downloaded. Lists
     /// carry no IMDb ID, so series found by ID on their own page count from then on.
     pub(crate) fn mark_downloaded(&self, list: &mut [SeriesSummary]) -> Result<()> {
-        let jobs = self.store.jobs()?;
-        let done: HashSet<(SiteId, &str)> = jobs
+        let (folders, on_disk) = self.scanned()?;
+        let keys: HashSet<&str> = folders
             .iter()
-            .filter(|job| job.state == JobState::Done)
-            .map(|job| (job.episode.site, job.episode.slug.as_str()))
+            .filter(|folder| folder.has_episodes)
+            .map(|folder| folder.key.as_str())
             .collect();
-        let folders = self.title_folders()?;
-        let keys: HashSet<&str> = folders.iter().map(|folder| folder.key.as_str()).collect();
         let found = self.found.lock().unwrap_or_else(PoisonError::into_inner);
         for series in list {
-            series.downloaded = done.contains(&(series.site, series.slug.as_str()))
+            let id = (series.site, series.slug.clone());
+            series.downloaded = on_disk.contains(&id)
                 || keys.contains(title_key(&series.title).as_str())
-                || found.contains(&(series.site, series.slug.clone()));
+                || found.contains_key(&id);
         }
         Ok(())
     }
@@ -82,6 +101,14 @@ impl Core {
         let mut folders: Vec<PathBuf> = Vec::new();
         for job in ours {
             let path = job.path.as_deref().map(Path::new);
+            // The folder a download went to, even if it matches neither ID nor name.
+            if let Some(folder) = path.and_then(series_folder) {
+                folders.push(folder);
+            }
+            // A file deleted since is no longer downloaded.
+            if !on_disk(job) {
+                continue;
+            }
             // Downloads from before 1.2.2 recorded only the picked language; the name has it.
             let named = path
                 .and_then(Path::file_name)
@@ -90,15 +117,11 @@ impl Core {
                 (job.episode.season, job.episode.number),
                 job.language.or(named),
             ));
-            // The folder a download went to, even if it matches neither ID nor name.
-            if let Some(folder) = path.and_then(series_folder) {
-                folders.push(folder);
-            }
         }
 
         let key = title_key(title);
         let imdb_id = imdb_id.filter(|id| *id != "none");
-        for folder in self.title_folders()?.iter() {
+        for folder in self.scanned()?.0.iter() {
             let same_id = imdb_id.is_some() && folder.imdb_id.as_deref() == imdb_id;
             // A folder that names another IMDb ID is another series, whatever its name.
             let other_id = imdb_id.is_some() && folder.imdb_id.is_some() && !same_id;
@@ -114,21 +137,56 @@ impl Core {
         // One entry per episode, the one with a known language if any.
         found.sort_by_key(|(pair, language)| (*pair, language.is_none()));
         found.dedup_by_key(|(pair, _)| *pair);
-        if !found.is_empty() {
-            let mut known = self.found.lock().unwrap_or_else(PoisonError::into_inner);
-            known.insert((site, slug.to_owned()));
+        let mut known = self.found.lock().unwrap_or_else(PoisonError::into_inner);
+        if found.is_empty() {
+            known.remove(&(site, slug.to_owned()));
+        } else {
+            let names = (title.to_owned(), imdb_id.map(str::to_owned));
+            known.insert((site, slug.to_owned()), names);
         }
         Ok(found)
     }
 
+    /// Reads the libraries again and checks every title found before, so files deleted
+    /// since are no longer marked. Runs every few minutes; reads files, so off the runtime.
+    pub fn refresh_downloaded(&self) -> Result<()> {
+        self.forget_scan();
+        self.scanned()?;
+        let known: Vec<_> = {
+            let found = self.found.lock().unwrap_or_else(PoisonError::into_inner);
+            found
+                .iter()
+                .map(|(id, names)| (id.clone(), names.clone()))
+                .collect()
+        };
+        for ((site, slug), (title, imdb_id)) in known {
+            self.downloaded_with_language(site, &slug, &title, imdb_id.as_deref())?;
+        }
+        Ok(())
+    }
+
+    /// Calls [`Self::refresh_downloaded`] every few minutes, for the life of the server.
+    pub async fn run_library_scan(self: Arc<Self>) {
+        loop {
+            tokio::time::sleep(RESCAN_EVERY).await;
+            let core = self.clone();
+            match tokio::task::spawn_blocking(move || core.refresh_downloaded()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => tracing::warn!("could not check the libraries: {err}"),
+                Err(err) => tracing::warn!("the library check stopped: {err}"),
+            }
+        }
+    }
+
     /// Series folders directly in every library, and in a `Series` folder inside it where
-    /// Kura 1.0 and 1.1 put them.
-    fn title_folders(&self) -> Result<Arc<Vec<TitleFolder>>> {
+    /// Kura 1.0 and 1.1 put them; and the series whose finished downloads are still there.
+    #[allow(clippy::type_complexity)]
+    fn scanned(&self) -> Result<(Arc<Vec<TitleFolder>>, Arc<HashSet<(SiteId, String)>>)> {
         let lock = || self.scan.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((scanned, folders)) = lock().clone()
-            && scanned.elapsed() < SCAN_EVERY
+        if let Some(scan) = lock().as_ref()
+            && scan.at.elapsed() < SCAN_EVERY
         {
-            return Ok(folders);
+            return Ok((scan.folders.clone(), scan.on_disk.clone()));
         }
         let mut folders = Vec::new();
         for library in self.store.settings()?.libraries {
@@ -143,23 +201,44 @@ impl Core {
                     if !is_dir || name.starts_with('.') || name == "Series" {
                         continue;
                     }
+                    let mut episodes = Vec::new();
+                    episodes_in(&entry.path(), 0, &mut episodes);
                     folders.push(TitleFolder {
                         key: title_key(&name),
                         imdb_id: folder_imdb_id(&name),
                         path: entry.path(),
+                        has_episodes: !episodes.is_empty(),
                     });
                 }
             }
         }
+        let jobs = self.store.jobs()?;
+        let on_disk: HashSet<_> = jobs
+            .iter()
+            .filter(|job| job.state == JobState::Done && on_disk(job))
+            .map(|job| (job.episode.site, job.episode.slug.clone()))
+            .collect();
         let folders = Arc::new(folders);
-        *lock() = Some((Instant::now(), folders.clone()));
-        Ok(folders)
+        let on_disk = Arc::new(on_disk);
+        *lock() = Some(Scan {
+            at: Instant::now(),
+            folders: folders.clone(),
+            on_disk: on_disk.clone(),
+        });
+        Ok((folders, on_disk))
     }
 
     /// Makes the next lookup read the library folders again, e.g. after a download.
-    pub(crate) fn forget_scan(&self) {
+    pub fn forget_scan(&self) {
         *self.scan.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
+}
+
+/// Whether the file of a finished download is still there.
+fn on_disk(job: &Job) -> bool {
+    job.path
+        .as_deref()
+        .is_some_and(|path| Path::new(path).is_file())
 }
 
 /// The series folder of an episode file: `<series>/Season 01/<file>`.

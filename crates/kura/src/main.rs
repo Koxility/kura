@@ -87,6 +87,7 @@ async fn serve() -> anyhow::Result<()> {
         served = axum::serve(listener, api::router(core.clone())) => served?,
         worked = core.clone().run() => worked.context("the download workers stopped")?,
         synced = core.clone().run_auto_sync() => synced.context("Auto-Sync stopped")?,
+        () = core.clone().run_library_scan() => {}
         () = stop_signal() => tracing::info!("Kura is stopping"),
     }
     Ok(())

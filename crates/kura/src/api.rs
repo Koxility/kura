@@ -374,6 +374,8 @@ async fn downloaded(
     Path((site, slug)): Path<(SiteId, String)>,
     Query(names): Query<SeriesNames>,
 ) -> ApiResult<Json<Vec<(u32, u32)>>> {
+    // Read the library again: files may have been deleted or added since the last look.
+    core.forget_scan();
     let found = core.downloaded_episodes(site, &slug, &names.title, names.imdb.as_deref());
     Ok(Json(found?))
 }
