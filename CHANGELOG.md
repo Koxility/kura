@@ -4,6 +4,16 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-14
+
+### Fixed
+
+- The Requests and Queue pages show the language of every request, title and episode. A finished download records the language it was actually downloaded in, also when none was picked.
+- Titles are marked as downloaded more reliably. Names match without spaces and without bracketed parts like a year (`Re:Zero` = `ReZero (2016)`), a folder with a different IMDb ID no longer matches by name, and a series found by IMDb ID on its page is marked in lists too.
+- A title in the queue stays one line, however many of its episodes download at once.
+- **Remove** on the Auto-Sync page takes a title off the tracked list instead of moving it to the excluded titles. It is tracked again once another episode of it is downloaded.
+- Auto-Sync stays with the language of the episodes already downloaded: after a German dub it queues only episodes offered as German dub and never falls back to German sub. Episodes already in the library, also ones Kura did not download, are not queued again.
+
 ## [1.2.1] - 2026-11-13
 
 ### Fixed
@@ -103,7 +113,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/Koxility/kura/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/Koxility/kura/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Koxility/kura/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Koxility/kura/compare/v1.0.0...v1.1.0

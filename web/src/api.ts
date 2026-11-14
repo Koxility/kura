@@ -83,7 +83,14 @@ export interface Settings {
   /** The first is the main library. */
   libraries: Library[];
   disabled_sites: Site[];
-  auto_sync: { enabled: boolean; only_new: boolean; schedule: Schedule; excluded: TitleRef[] };
+  auto_sync: {
+    enabled: boolean;
+    only_new: boolean;
+    schedule: Schedule;
+    excluded: TitleRef[];
+    /** Taken off the tracked list until a later download; `at` in Unix seconds. */
+    removed: (TitleRef & { at: number })[];
+  };
 }
 
 export interface Status {
@@ -213,6 +220,10 @@ export const languageNames: Record<Language, string> = {
   english: "English",
 };
 export const languages = Object.keys(languageNames) as Language[];
+
+/** A picked language, or what applies when none was picked. */
+export const languageLabel = (language: Language | null) =>
+  language ? languageNames[language] : "Language from the settings";
 
 // shortcut: mirrors the hosters the server can extract from; serve the list from the API
 // once hosters change more often than this file.

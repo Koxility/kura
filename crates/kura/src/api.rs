@@ -63,6 +63,7 @@ pub fn router(core: Arc<Core>) -> Router {
         .route("/autosync", get(sync_status))
         .route("/autosync/run", post(sync_now))
         .route("/autosync/exclude", post(exclude))
+        .route("/autosync/remove", post(remove_tracked))
         .route("/library", get(library_roots))
         .route("/library/{root}", get(browse))
         .route("/admin/ip", get(public_ip))
@@ -546,6 +547,19 @@ async fn exclude(State(core): App, _: Admin, Json(form): Json<Exclude>) -> ApiRe
         return Err(error(StatusCode::BAD_REQUEST, "the title is too long"));
     }
     core.set_excluded(form.title, form.excluded)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Takes a title off the tracked list until one of its episodes is downloaded again.
+async fn remove_tracked(
+    State(core): App,
+    _: Admin,
+    Json(title): Json<TitleRef>,
+) -> ApiResult<StatusCode> {
+    if title.slug.len() > 200 || title.title.len() > 300 {
+        return Err(error(StatusCode::BAD_REQUEST, "the title is too long"));
+    }
+    core.remove_tracked(title)?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -1,6 +1,7 @@
 //! What is already downloaded: finished downloads in the database, and series folders found
 //! in the libraries, matched by IMDb ID or by name. Folders count even when Kura did not
-//! create them, so a library filled by hand or by another tool is recognised too.
+//! create them, so a library filled by hand or by another tool is recognised too. File names
+//! also tell the language an episode is in.
 
 use std::{
     collections::HashSet,
@@ -9,9 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use kura_domain::{JobState, SeriesSummary, SiteId};
+use kura_domain::{JobState, Language, SeriesSummary, SiteId};
 
-use crate::{Core, Result};
+use crate::{Core, Result, naming::language_in};
 
 /// Library folders are read at most this often; pages ask for every list they show.
 const SCAN_EVERY: Duration = Duration::from_secs(30);
@@ -28,8 +29,12 @@ pub(crate) struct TitleFolder {
 
 pub(crate) type Scan = (Instant, Arc<Vec<TitleFolder>>);
 
+/// A downloaded `(season, episode)` and its language, when the record or file name tells it.
+pub(crate) type Found = ((u32, u32), Option<Language>);
+
 impl Core {
-    /// Sets `downloaded` on every series of which at least one episode is downloaded.
+    /// Sets `downloaded` on every series of which at least one episode is downloaded. Lists
+    /// carry no IMDb ID, so series found by ID on their own page count from then on.
     pub(crate) fn mark_downloaded(&self, list: &mut [SeriesSummary]) -> Result<()> {
         let jobs = self.store.jobs()?;
         let done: HashSet<(SiteId, &str)> = jobs
@@ -39,9 +44,11 @@ impl Core {
             .collect();
         let folders = self.title_folders()?;
         let keys: HashSet<&str> = folders.iter().map(|folder| folder.key.as_str()).collect();
+        let found = self.found.lock().unwrap_or_else(PoisonError::into_inner);
         for series in list {
             series.downloaded = done.contains(&(series.site, series.slug.as_str()))
-                || keys.contains(title_key(&series.title).as_str());
+                || keys.contains(title_key(&series.title).as_str())
+                || found.contains(&(series.site, series.slug.clone()));
         }
         Ok(())
     }
@@ -55,20 +62,36 @@ impl Core {
         title: &str,
         imdb_id: Option<&str>,
     ) -> Result<Vec<(u32, u32)>> {
+        let found = self.downloaded_with_language(site, slug, title, imdb_id)?;
+        Ok(found.into_iter().map(|(pair, _)| pair).collect())
+    }
+
+    /// Like [`Self::downloaded_episodes`], with the language of each episode where known.
+    pub(crate) fn downloaded_with_language(
+        &self,
+        site: SiteId,
+        slug: &str,
+        title: &str,
+        imdb_id: Option<&str>,
+    ) -> Result<Vec<Found>> {
         let jobs = self.store.jobs()?;
         let ours = jobs.iter().filter(|job| {
             job.state == JobState::Done && job.episode.site == site && job.episode.slug == slug
         });
-        let mut found: Vec<(u32, u32)> = Vec::new();
+        let mut found: Vec<Found> = Vec::new();
         let mut folders: Vec<PathBuf> = Vec::new();
         for job in ours {
-            found.push((job.episode.season, job.episode.number));
+            let path = job.path.as_deref().map(Path::new);
+            // Downloads from before 1.2.2 recorded only the picked language; the name has it.
+            let named = path
+                .and_then(Path::file_name)
+                .and_then(|name| language_in(&name.to_string_lossy()));
+            found.push((
+                (job.episode.season, job.episode.number),
+                job.language.or(named),
+            ));
             // The folder a download went to, even if it matches neither ID nor name.
-            if let Some(folder) = job
-                .path
-                .as_deref()
-                .and_then(|path| series_folder(Path::new(path)))
-            {
+            if let Some(folder) = path.and_then(series_folder) {
                 folders.push(folder);
             }
         }
@@ -77,7 +100,9 @@ impl Core {
         let imdb_id = imdb_id.filter(|id| *id != "none");
         for folder in self.title_folders()?.iter() {
             let same_id = imdb_id.is_some() && folder.imdb_id.as_deref() == imdb_id;
-            if same_id || folder.key == key {
+            // A folder that names another IMDb ID is another series, whatever its name.
+            let other_id = imdb_id.is_some() && folder.imdb_id.is_some() && !same_id;
+            if same_id || (folder.key == key && !other_id) {
                 folders.push(folder.path.clone());
             }
         }
@@ -86,8 +111,13 @@ impl Core {
         for folder in &folders {
             episodes_in(folder, 0, &mut found);
         }
-        found.sort_unstable();
-        found.dedup();
+        // One entry per episode, the one with a known language if any.
+        found.sort_by_key(|(pair, language)| (*pair, language.is_none()));
+        found.dedup_by_key(|(pair, _)| *pair);
+        if !found.is_empty() {
+            let mut known = self.found.lock().unwrap_or_else(PoisonError::into_inner);
+            known.insert((site, slug.to_owned()));
+        }
         Ok(found)
     }
 
@@ -137,18 +167,26 @@ pub(crate) fn series_folder(file: &Path) -> Option<PathBuf> {
     Some(file.parent()?.parent()?.to_owned())
 }
 
-/// A name reduced to lower-case letters and digits, so `One Piece [imdbid-tt0388629]`,
-/// `One Piece` and `one-piece!` are the same title.
+/// A name reduced to lower-case letters and digits, without spaces and without what is in
+/// brackets, so `One Piece [imdbid-tt0388629]`, `OnePiece`, `one-piece!` and
+/// `One Piece (1999)` are the same title.
 pub(crate) fn title_key(name: &str) -> String {
-    let name = match name.find(" [imdbid-") {
-        Some(start) => &name[..start],
-        None => name,
+    let letters = |outside_brackets: bool| {
+        let mut key = String::new();
+        let mut depth = 0u32;
+        for c in name.chars() {
+            match c {
+                '(' | '[' if outside_brackets => depth += 1,
+                ')' | ']' if outside_brackets => depth = depth.saturating_sub(1),
+                c if depth == 0 && c.is_alphanumeric() => key.extend(c.to_lowercase()),
+                _ => {}
+            }
+        }
+        key
     };
-    let words = name
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .map(str::to_lowercase);
-    words.collect::<Vec<_>>().join(" ")
+    let key = letters(true);
+    // A name that is all brackets keeps them, so it does not match every other such name.
+    if key.is_empty() { letters(false) } else { key }
 }
 
 /// `tt0388629` from `One Piece [imdbid-tt0388629]`.
@@ -158,8 +196,9 @@ fn folder_imdb_id(name: &str) -> Option<String> {
     (id != "none" && kura_domain::is_imdb_id(id)).then(|| id.to_owned())
 }
 
-/// Collects `SxxEyy` from video file names in `dir` and the folders below it (seasons).
-fn episodes_in(dir: &Path, depth: u8, found: &mut Vec<(u32, u32)>) {
+/// Collects `SxxEyy` and the language from video file names in `dir` and the folders below
+/// it (seasons).
+fn episodes_in(dir: &Path, depth: u8, found: &mut Vec<Found>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -175,11 +214,9 @@ fn episodes_in(dir: &Path, depth: u8, found: &mut Vec<(u32, u32)>) {
             .extension()
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| VIDEO.contains(&ext.to_ascii_lowercase().as_str()));
-        if let Some(pair) = video
-            .then(|| episode_code(&entry.file_name().to_string_lossy()))
-            .flatten()
-        {
-            found.push(pair);
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if let Some(pair) = video.then(|| episode_code(&name)).flatten() {
+            found.push((pair, language_in(&name)));
         }
     }
 }
@@ -218,9 +255,11 @@ mod tests {
 
     #[test]
     fn titles_compare_by_letters_and_digits() {
-        assert_eq!(title_key("One Piece [imdbid-tt0388629]"), "one piece");
-        assert_eq!(title_key("one-piece!"), "one piece");
+        assert_eq!(title_key("One Piece [imdbid-tt0388629]"), "onepiece");
+        assert_eq!(title_key("one-piece!"), "onepiece");
         assert_eq!(title_key("Re Zero  Part 2"), title_key("Re:Zero / Part 2"));
+        assert_eq!(title_key("ReZero (2016)"), title_key("Re:Zero"));
+        assert_eq!(title_key("[2016]"), "2016");
         assert_eq!(
             folder_imdb_id("One Piece [imdbid-tt0388629]").as_deref(),
             Some("tt0388629")

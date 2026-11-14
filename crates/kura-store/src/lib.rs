@@ -445,8 +445,13 @@ impl Store {
         self.update_running("progress = ?2", params![id, progress])
     }
 
-    pub fn finish(&self, id: i64, path: &str) -> Result<()> {
-        self.update_running("state = 'done', progress = 1, path = ?2", params![id, path])
+    /// Marks a job done with its file and the language that was downloaded, which replaces
+    /// the picked one (`None` for "follow the settings").
+    pub fn finish(&self, id: i64, path: &str, language: Language) -> Result<()> {
+        self.update_running(
+            "state = 'done', progress = 1, path = ?2, language = ?3",
+            params![id, path, language.as_str()],
+        )
     }
 
     pub fn fail(&self, id: i64, error: &str) -> Result<()> {
@@ -808,7 +813,9 @@ mod tests {
         );
         store.claim_next().unwrap();
         assert!(store.cancel(id).unwrap());
-        store.finish(id, "/downloads/x.mkv").unwrap();
+        store
+            .finish(id, "/downloads/x.mkv", Language::GermanSub)
+            .unwrap();
 
         let job = &store.jobs().unwrap()[0];
         assert_eq!(
@@ -823,7 +830,9 @@ mod tests {
         let id = store.enqueue(&new_job(&episode(1), admin.id)).unwrap();
         store.enqueue(&new_job(&episode(2), admin.id)).unwrap();
         store.claim_next().unwrap();
-        store.finish(id.unwrap(), "/media/x.mkv").unwrap();
+        store
+            .finish(id.unwrap(), "/media/x.mkv", Language::GermanSub)
+            .unwrap();
 
         // Only the finished one is cleared; the waiting one stays visible.
         assert_eq!(store.hide_finished().unwrap(), 1);

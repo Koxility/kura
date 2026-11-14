@@ -57,13 +57,21 @@ impl Site for FakeSite {
         })
     }
 
-    async fn episodes(&self, _: &str, season: u32) -> kura_sites::Result<Vec<Episode>> {
-        Ok((1..=3)
+    async fn episodes(&self, slug: &str, season: u32) -> kura_sites::Result<Vec<Episode>> {
+        use Language::{GermanDub, GermanSub};
+        // `mixed` offers its episodes in different languages; every other series in dub.
+        let languages = |number| match (slug, number) {
+            ("mixed", 2) => vec![GermanDub, GermanSub],
+            ("mixed", 3) => vec![GermanSub],
+            _ => vec![GermanDub],
+        };
+        let count = if slug == "mixed" { 4 } else { 3 };
+        Ok((1..=count)
             .map(|number| Episode {
                 season,
                 number,
                 title: format!("Episode {number}"),
-                languages: vec![Language::GermanDub],
+                languages: languages(number),
             })
             .collect())
     }
@@ -840,6 +848,48 @@ async fn auto_sync_queues_what_is_new_and_fills_gaps_only_when_asked() {
     };
     s.core.set_excluded(title, true).unwrap();
     assert!(s.core.sync_status().unwrap().titles.is_empty());
+}
+
+#[tokio::test]
+async fn auto_sync_keeps_the_downloaded_language_and_skips_files_in_the_library() {
+    let links = vec![
+        link(Language::GermanSub, "voe", "https://voe/sub"),
+        link(Language::GermanDub, "voe", "https://voe/dub"),
+    ];
+    let s = setup(links, 1);
+    let first_episode = s
+        .core
+        .enqueue(
+            SiteId::AniWorld,
+            "mixed",
+            first(),
+            &Choices::default(),
+            s.user,
+        )
+        .await;
+    first_episode.unwrap();
+    // Without a picked language the settings chose German dub, and the job says so.
+    let jobs = states(&s.core, &[JobState::Done]).await;
+    assert_eq!(jobs[0].language, Some(Language::GermanDub));
+    // Episode 4 was put into the series folder by hand.
+    let season = PathBuf::from(jobs[0].path.as_deref().unwrap());
+    let season = season.parent().unwrap();
+    std::fs::write(season.join("Mixed S01E004 German Dub.mkv"), b"").unwrap();
+    s.core.forget_scan();
+
+    // Sub first now: Auto-Sync must still stay with the dub.
+    let mut settings = s.core.settings().unwrap();
+    settings.languages = vec![Language::GermanSub, Language::GermanDub];
+    settings.auto_sync.only_new = false;
+    s.core.save_settings(&settings).unwrap();
+
+    // Episode 2 has a dub, episode 3 only a sub, episode 4 is in the library.
+    assert_eq!(s.core.sync_once().await.unwrap(), 1);
+    let jobs = states(&s.core, &[JobState::Done; 2]).await;
+    assert_eq!(jobs[1].episode.number, 2);
+    assert_eq!(jobs[1].language, Some(Language::GermanDub));
+    assert!(jobs[1].path.as_deref().unwrap().ends_with("German Dub.mkv"));
+    assert_eq!(s.core.sync_once().await.unwrap(), 0);
 }
 
 #[tokio::test]

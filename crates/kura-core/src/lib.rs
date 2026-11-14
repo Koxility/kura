@@ -11,7 +11,7 @@ mod requests;
 mod sync;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration, Instant},
@@ -20,8 +20,8 @@ use std::{
 use async_trait::async_trait;
 pub use auth::SESSION_TTL;
 use kura_domain::{
-    Episode, EpisodeId, Genre, HosterLink, Job, JobState, Language, OutputFormat, Schedule, Series,
-    SeriesSummary, Settings, SiteId, Stream, TitleRef,
+    Episode, EpisodeId, Genre, HosterLink, Job, JobState, Language, OutputFormat, RemovedTitle,
+    Schedule, Series, SeriesSummary, Settings, SiteId, Stream, TitleRef,
 };
 use kura_download::{DownloadError, Progress};
 use kura_hosters::Hoster;
@@ -158,6 +158,10 @@ pub struct Core {
     update: Mutex<Option<(Instant, Option<String>)>>,
     /// Series folders found in the libraries, kept for a moment.
     scan: Mutex<Option<downloaded::Scan>>,
+    /// Series a title page found downloaded episodes for, also by IMDb ID, so lists mark them.
+    // shortcut: in memory, a series matched only by IMDb ID is marked in lists once its page
+    // was opened since the start; store it if that is not enough.
+    found: Mutex<HashSet<(SiteId, String)>>,
 }
 
 /// When a site's full list was fetched, and the list.
@@ -186,6 +190,7 @@ impl Core {
             sync_wake: Notify::new(),
             update: Mutex::default(),
             scan: Mutex::default(),
+            found: Mutex::default(),
         })
     }
 
@@ -355,6 +360,19 @@ impl Core {
         Ok(self.store.save_settings(&settings)?)
     }
 
+    /// Takes a title off Auto-Sync's tracked list without excluding it. Downloading an
+    /// episode of it later tracks it again.
+    pub fn remove_tracked(&self, title: TitleRef) -> Result<()> {
+        let mut settings = self.store.settings()?;
+        let list = &mut settings.auto_sync.removed;
+        list.retain(|other| other.title.site != title.site || other.title.slug != title.slug);
+        list.push(RemovedTitle {
+            title,
+            at: auth::now(),
+        });
+        Ok(self.store.save_settings(&settings)?)
+    }
+
     // Queue
 
     pub fn jobs(&self) -> Result<Vec<Job>> {
@@ -509,10 +527,10 @@ impl Core {
         let mut running = self.running();
         let download = tokio::spawn(async move {
             let saved = match core.process(&job).await {
-                Ok(path) => {
+                Ok((path, language)) => {
                     // The new file should show as downloaded at once.
                     core.forget_scan();
-                    core.store.finish(id, &path.to_string_lossy())
+                    core.store.finish(id, &path.to_string_lossy(), language)
                 }
                 Err(reason) => core.store.fail(id, &reason),
             };
@@ -528,8 +546,9 @@ impl Core {
 
     /// Downloads one episode. Languages are tried in order and, within a language, hosters in
     /// order. A language picked for the job replaces the order from the settings; a picked
-    /// hoster goes first. The error lists every failed attempt.
-    async fn process(&self, job: &Job) -> std::result::Result<PathBuf, String> {
+    /// hoster goes first. Returns the file and its language; the error lists every failed
+    /// attempt.
+    async fn process(&self, job: &Job) -> std::result::Result<(PathBuf, Language), String> {
         let settings = self.store.settings().map_err(|err| err.to_string())?;
         let site = self.site(job.episode.site).map_err(|err| err.to_string())?;
         let links = site.links(&job.episode).await;
@@ -573,7 +592,7 @@ impl Core {
                     let target = target(language);
                     let fetched = self.fetch(job.id, hoster.as_ref(), link, &target, format);
                     match fetched.await {
-                        Ok(()) => return Ok(target),
+                        Ok(()) => return Ok((target, language)),
                         Err(reason) => {
                             failures.push(format!("{name}, {}: {reason}", language.as_str()));
                         }

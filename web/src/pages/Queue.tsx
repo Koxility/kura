@@ -1,6 +1,14 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, episodeCode, formatBytes, type Job, type JobState, jobsQuery } from "../api";
+import {
+  api,
+  episodeCode,
+  formatBytes,
+  type Job,
+  type JobState,
+  jobsQuery,
+  languageLabel,
+} from "../api";
 import ui from "../ui.module.css";
 import styles from "./Queue.module.css";
 
@@ -44,6 +52,8 @@ const stateStyles: Partial<Record<JobState, string>> = {
 };
 
 const code = (job: Job) => episodeCode(job.episode.season, job.episode.number);
+/** Running episodes named in a title's summary; more are counted, so the line stays short. */
+const NAMED = 3;
 const isActive = (job: Job) => job.state === "queued" || job.state === "running";
 
 function groupState(jobs: Job[]): GroupState {
@@ -200,9 +210,14 @@ function GroupRow({
   const progress = (done + running.reduce((sum, job) => sum + job.progress, 0)) / jobs.length;
   const speed = running.reduce((sum, job) => sum + (job.speed ?? 0), 0);
 
+  const named = running.slice(0, NAMED).map(code).join(", ");
+  const more = running.length > NAMED ? ` +${running.length - NAMED} more` : "";
+  // A finished job holds the language it was downloaded in, a waiting one the picked one.
+  const languages = [...new Set(jobs.map((job) => languageLabel(job.language)))];
   const status = [
+    languages.join(", "),
     running.length > 0 &&
-      `Downloading ${running.map(code).join(", ")}${speed > 0 ? ` · ${formatBytes(speed)}/s` : ""}`,
+      `Downloading ${named}${more}${speed > 0 ? ` · ${formatBytes(speed)}/s` : ""}`,
     waiting > 0 && `${waiting} waiting`,
     failed.length > 0 && `${failed.length} failed`,
   ].filter(Boolean);
@@ -223,7 +238,7 @@ function GroupRow({
           <button type="button" className={styles.title} onClick={onToggle}>
             {group.title}
           </button>
-          <p className={styles.summary}>
+          <p className={styles.summary} title={status.join(" · ")}>
             <span className={done === jobs.length ? ui.ok : undefined}>
               {done} of {jobs.length} {jobs.length === 1 ? "episode" : "episodes"} downloaded
             </span>
@@ -270,6 +285,7 @@ function GroupRow({
           {jobs.map((job) => (
             <li key={job.id} className={ui.row}>
               <span className={`${ui.mono} ${ui.muted}`}>{code(job)}</span>
+              <span className={ui.muted}>{languageLabel(job.language)}</span>
               <div className={ui.grow}>
                 {job.state === "failed" && job.error && <p className={ui.error}>{job.error}</p>}
               </div>

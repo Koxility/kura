@@ -5,7 +5,7 @@ import {
   describePicked,
   formatTime,
   hosterNames,
-  languageNames,
+  languageLabel,
   type Request,
   type RequestState,
   requestsQuery,
@@ -135,7 +135,7 @@ function Row({
 }) {
   const details = [
     describePicked(request.picked),
-    request.language && languageNames[request.language],
+    languageLabel(request.language),
     request.hoster && (hosterNames[request.hoster] ?? request.hoster),
     siteNames[request.site],
     admin && `by ${request.user_name}`,

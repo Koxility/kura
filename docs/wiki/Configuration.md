@@ -72,7 +72,7 @@ Switch AniWorld or SerienStream off to hide them everywhere, including Auto-Sync
 - **Only new episodes**: on, only episodes after the newest downloaded one; off, missing earlier episodes are downloaded too.
 - **Schedule**: every N minutes (5 to 10080) or every day at a fixed time (in `TZ`).
 
-New episodes are queued with the language, provider, library and IMDb ID of the series' last download, into the folder the series already has. Titles can be left out with **Remove** next to a tracked title on the Auto-Sync page, by searching under *Exclude titles*, or with the checkbox on a title's page; *Include again* brings them back. **Sync now** on the Auto-Sync page runs a check at once.
+New episodes are queued in the language of the newest episode already downloaded (from Kura's records or the file name, e.g. `German Dub`) and with the provider, library and IMDb ID of the series' last download, into the folder the series already has. An episode that is not offered in that language yet is skipped and queued by a later check once it is. Episodes already in the library are never queued again, also ones Kura did not download. **Remove** next to a tracked title takes it off the list until another episode of it is downloaded. Titles can be left out for good by searching under *Exclude titles* or with the checkbox on a title's page; *Include again* brings them back. **Sync now** on the Auto-Sync page runs a check at once.
 
 ## Settings → Users
 
