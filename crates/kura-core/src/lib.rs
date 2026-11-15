@@ -57,6 +57,9 @@ pub enum CoreError {
     Invalid(&'static str),
     #[error("could not hash the password: {0}")]
     Hashing(String),
+    /// Too many wrong logins for one name; the number is the seconds to wait.
+    #[error("too many wrong logins; try again in {0} seconds")]
+    TooManyLogins(u64),
     /// A library folder that does not exist and cannot be created.
     #[error("the folder {0} cannot be created: {1}")]
     Folder(String, std::io::Error),
@@ -163,6 +166,8 @@ pub struct Core {
     // shortcut: in memory, a series matched only by IMDb ID is marked in lists once its page
     // was opened since the start; store it if that is not enough.
     found: Mutex<downloaded::FoundTitles>,
+    /// Wrong logins per address and name, so passwords cannot be guessed at speed.
+    logins: Mutex<auth::LoginTries>,
 }
 
 /// When a site's full list was fetched, and the list.
@@ -200,6 +205,7 @@ impl Core {
             update: Mutex::default(),
             scan: Mutex::default(),
             found: Mutex::default(),
+            logins: Mutex::default(),
         })
     }
 

@@ -1,11 +1,11 @@
 //! The JSON API under `/api/v1` and the embedded web app. No logic lives here: handlers
 //! check who is asking, call `Core` and turn the answer into JSON.
 
-use std::{convert::Infallible, sync::Arc};
+use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 use axum::{
     Json, Router,
-    extract::{FromRequestParts, Path, Query, State},
+    extract::{ConnectInfo, FromRequestParts, Path, Query, State},
     http::{
         HeaderMap, StatusCode, Uri,
         header::{CONTENT_TYPE, COOKIE, SET_COOKIE},
@@ -33,7 +33,14 @@ use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};
 type App = State<Arc<Core>>;
 type ApiResult<T> = Result<T, ApiError>;
 
-pub fn router(core: Arc<Core>) -> Router {
+/// Answers requests on `listener` until it fails.
+pub async fn serve(listener: tokio::net::TcpListener, core: Arc<Core>) -> std::io::Result<()> {
+    // Logins need the address a connection comes from.
+    let app = router(core).into_make_service_with_connect_info::<SocketAddr>();
+    axum::serve(listener, app).await
+}
+
+fn router(core: Arc<Core>) -> Router {
     let api = Router::new()
         .route("/status", get(status))
         .route("/setup", post(setup))
@@ -96,6 +103,7 @@ impl From<CoreError> for ApiError {
             CoreError::UnknownSite | CoreError::SiteDisabled | CoreError::UnknownJob => {
                 StatusCode::NOT_FOUND
             }
+            CoreError::TooManyLogins(_) => StatusCode::TOO_MANY_REQUESTS,
             // The site did not answer or changed its pages.
             CoreError::Site(_) => StatusCode::BAD_GATEWAY,
             CoreError::Store(_) | CoreError::Http(_) | CoreError::Hashing(_) => {
@@ -197,22 +205,39 @@ async fn status(State(core): App, headers: HeaderMap) -> ApiResult<Json<Value>> 
             _ => Vec::new(),
         },
         // Offered by the library setup; the folder the server runs in is a sensible start.
-        "suggested_library_path": std::env::var("KURA_LIBRARY_DIR").ok().or_else(|| {
-            let here = std::env::current_dir().ok()?;
-            Some(here.join("downloads").to_string_lossy().into_owned())
-        }),
+        // Like every path on the server it is for admins, not for whoever asks.
+        "suggested_library_path": match &user {
+            Some(user) if user.role == Role::Admin => suggested_library_path(),
+            _ => None,
+        },
     })))
 }
 
-async fn setup(State(core): App, Json(form): Json<Credentials>) -> ApiResult<Response> {
+fn suggested_library_path() -> Option<String> {
+    std::env::var("KURA_LIBRARY_DIR").ok().or_else(|| {
+        let here = std::env::current_dir().ok()?;
+        Some(here.join("downloads").to_string_lossy().into_owned())
+    })
+}
+
+async fn setup(
+    State(core): App,
+    from: ConnectInfo<SocketAddr>,
+    Json(form): Json<Credentials>,
+) -> ApiResult<Response> {
     if core.setup(&form.name, &form.password).await?.is_none() {
         return Err(error(StatusCode::CONFLICT, "Kura is already set up"));
     }
-    login(State(core), Json(form)).await
+    login(State(core), from, Json(form)).await
 }
 
-async fn login(State(core): App, Json(form): Json<Credentials>) -> ApiResult<Response> {
-    let Some((user, token)) = core.login(&form.name, &form.password).await? else {
+async fn login(
+    State(core): App,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    Json(form): Json<Credentials>,
+) -> ApiResult<Response> {
+    let logged_in = core.login(&form.name, &form.password, from.ip());
+    let Some((user, token)) = logged_in.await? else {
         return Err(error(StatusCode::UNAUTHORIZED, "wrong name or password"));
     };
     Ok((session_cookie(&token, SESSION_TTL), Json(user)).into_response())
@@ -420,8 +445,37 @@ impl Enqueue {
     }
 }
 
-async fn jobs(State(core): App, _: Session) -> ApiResult<Json<Vec<Job>>> {
-    Ok(Json(core.jobs()?))
+/// Everyone sees the queue, but where the files are on the server is for admins.
+async fn jobs(State(core): App, session: Session) -> ApiResult<Json<Vec<Job>>> {
+    let mut jobs = core.jobs()?;
+    if session.user.role != Role::Admin {
+        let libraries = core.settings()?.libraries.into_iter();
+        let mut folders: Vec<String> = libraries
+            .map(|library| library.path.to_string_lossy().into_owned())
+            .collect();
+        for job in &mut jobs {
+            without_paths(job, &mut folders);
+        }
+    }
+    Ok(Json(jobs))
+}
+
+/// Takes the folders on the server out of a job. `libraries` are the library paths; the
+/// job's own folder joins them, since it may be from a library that is gone by now.
+fn without_paths(job: &mut Job, libraries: &mut Vec<String>) {
+    let dir = std::mem::take(&mut job.dir);
+    if !dir.is_empty() && !libraries.contains(&dir) {
+        libraries.push(dir);
+    }
+    // The longest first, so a library inside another one is replaced whole.
+    libraries.sort_by_key(|folder| std::cmp::Reverse(folder.len()));
+    job.path = None;
+    // What ffmpeg says about a failed download can name the file it wrote to.
+    if let Some(error) = &mut job.error {
+        for folder in libraries.iter().filter(|folder| !folder.is_empty()) {
+            *error = error.replace(folder.as_str(), "<library>");
+        }
+    }
 }
 
 async fn enqueue(

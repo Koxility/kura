@@ -4,6 +4,15 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-11-15
+
+### Security
+
+- Passwords can no longer be guessed at speed. After five wrong logins for a name from one address, the next try has to wait 30 seconds, and every further wrong try doubles the wait, up to 15 minutes. A login that works starts the count again, and sessions that exist go on working. Before, Kura answered as many tries as it was sent, about 70 a second. Behind a reverse proxy every login comes from the proxy's address, so there the limit is per name.
+- A burst of logins no longer uses up the server's memory. Checking a password takes about 19 MiB, and logging in needs no account: 64 logins at once took 2.3 GB, enough to get a small server or a container with a memory limit stopped. Kura now checks four passwords at a time and the rest wait their turn.
+- Users without admin rights no longer see where the files are on the server. The queue sent every user the library folder and the full file path of each download, and errors from ffmpeg could name them too. Admins still get them.
+- Kura no longer tells someone who is not logged in which folder it runs in. The suggested library path was part of the status every visitor gets; now only admins get it.
+
 ## [1.2.5] - 2026-11-15
 
 ### Fixed
@@ -143,7 +152,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.5...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.6...HEAD
+[1.2.6]: https://github.com/Koxility/kura/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/Koxility/kura/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/Koxility/kura/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/Koxility/kura/compare/v1.2.2...v1.2.3

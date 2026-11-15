@@ -56,6 +56,10 @@ Settings → Administration → IP check shows the public address Kura uses. Wit
 
 Kura matches library folders by IMDb ID or by title. If the folder has neither the same `[imdbid-…]` nor the same title as the site (for example a translated name), it cannot match. Rename the folder to the site's title, or add the IMDb ID: `Name [imdbid-tt0388629]`. Changes show at once on the title's page and within 5 minutes in lists.
 
+## "Too many wrong logins"
+
+After five wrong logins for a name from one address, the next try has to wait: 30 seconds at first, twice as long after every further wrong try, 15 minutes at most. The message says how long. Devices that are already logged in are not affected. Behind a reverse proxy all logins come from the proxy's address, so the wait applies to the name whoever tried.
+
 ## Forgot the admin password
 
 Another admin can delete and recreate the account under Settings → Users. If there is no other admin, stop Kura, move the data folder away, and start fresh; downloads on disk are not affected.

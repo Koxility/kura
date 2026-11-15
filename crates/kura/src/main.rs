@@ -84,7 +84,7 @@ async fn serve() -> anyhow::Result<()> {
     // Stopping drops the running downloads, which ends ffmpeg and removes partial files;
     // they start over on the next start.
     tokio::select! {
-        served = axum::serve(listener, api::router(core.clone())) => served?,
+        served = api::serve(listener, core.clone()) => served?,
         worked = core.clone().run() => worked.context("the download workers stopped")?,
         synced = core.clone().run_auto_sync() => synced.context("Auto-Sync stopped")?,
         () = core.clone().run_library_scan() => {}

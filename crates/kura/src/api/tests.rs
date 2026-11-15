@@ -14,7 +14,7 @@ impl Server {
         let core = Core::with_defaults(Store::open_in_memory().unwrap()).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
-        tokio::spawn(async move { axum::serve(listener, router(core)).await });
+        tokio::spawn(serve(listener, core));
         Self {
             http: Client::new(),
             base,
@@ -64,12 +64,8 @@ async fn setup_login_and_logout() {
     assert_eq!(fresh["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(fresh["latest_version"], Value::Null);
     assert_eq!(fresh["needs_library"], true);
-    assert!(
-        fresh["suggested_library_path"]
-            .as_str()
-            .unwrap()
-            .ends_with("downloads")
-    );
+    // Where the server keeps its files is not for someone who is not logged in.
+    assert_eq!(fresh["suggested_library_path"], Value::Null);
     assert!(
         fresh["repository"]
             .as_str()
@@ -86,6 +82,12 @@ async fn setup_login_and_logout() {
     let (_, status) = server.get("/status", &admin).await;
     assert_eq!(status["needs_setup"], false);
     assert_eq!(status["user"]["role"], "admin");
+    assert!(
+        status["suggested_library_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("downloads")
+    );
 
     let again = json!({ "name": "intruder", "password": "correct horse" });
     assert_eq!(server.call(Method::POST, "/setup", "", again).await.0, 409);
@@ -237,6 +239,7 @@ async fn settings_and_users_are_for_admins() {
         (&status["libraries"], &status["sites"]),
         (&json!([]), &json!(["aniworld", "serienstream"]))
     );
+    assert_eq!(status["suggested_library_path"], Value::Null);
     let (_, status) = server.get("/status", &admin).await;
     assert_eq!(status["libraries"], json!(["Main", "Anime"]));
 
@@ -317,4 +320,65 @@ async fn bad_requests_get_clear_answers() {
         .await
         .unwrap();
     assert!(page.status() == 200 || page.status() == 404);
+}
+
+#[tokio::test]
+async fn wrong_logins_are_slowed_down() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let wrong = json!({ "name": "admin", "password": "wrong horse" });
+    for _ in 0..5 {
+        let refused = server.call(Method::POST, "/login", "", wrong.clone());
+        assert_eq!(refused.await.0, 401);
+    }
+    // From here on the right password has to wait too.
+    let right = json!({ "name": "admin", "password": "correct horse" });
+    let (code, answer) = server.call(Method::POST, "/login", "", right).await;
+    assert_eq!(code, 429);
+    assert!(answer["error"].as_str().unwrap().contains("try again in"));
+    // A session that exists goes on working.
+    assert_eq!(server.get("/queue", &admin).await.0, 200);
+}
+
+#[test]
+fn users_see_jobs_without_server_paths() {
+    let job = |dir: &str, path: Option<&str>, error: Option<&str>| Job {
+        id: 1,
+        episode: kura_domain::EpisodeId {
+            site: SiteId::AniWorld,
+            slug: "frieren".into(),
+            season: 1,
+            number: 1,
+        },
+        series_title: "Frieren".into(),
+        state: kura_domain::JobState::Failed,
+        progress: 0.0,
+        error: error.map(str::to_owned),
+        path: path.map(str::to_owned),
+        language: None,
+        hoster: None,
+        dir: dir.to_owned(),
+        hidden: false,
+        queued_at: 0,
+        imdb_id: None,
+    };
+    let mut libraries = vec!["/media".to_owned(), "/media/anime".to_owned()];
+
+    let file = "/media/anime/Frieren/Season 01/Frieren S01E001.mkv";
+    let mut done = job("/media/anime", Some(file), None);
+    without_paths(&mut done, &mut libraries);
+    assert_eq!((done.dir.as_str(), done.path, done.error), ("", None, None));
+
+    // A library that was removed from the settings since is still a path on the server.
+    let error = "voe, german_dub: ffmpeg failed: Error opening output file \
+                 /mnt/old/Frieren/Season 01/x.mkv.part; vidmoly: /media/anime/Frieren is full";
+    let mut failed = job("/mnt/old", None, Some(error));
+    without_paths(&mut failed, &mut libraries);
+    assert_eq!(
+        failed.error.as_deref(),
+        Some(
+            "voe, german_dub: ffmpeg failed: Error opening output file \
+             <library>/Frieren/Season 01/x.mkv.part; vidmoly: <library>/Frieren is full"
+        )
+    );
 }
