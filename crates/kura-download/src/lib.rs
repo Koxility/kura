@@ -6,14 +6,32 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
     process::Stdio,
+    time::Duration,
 };
 
 use kura_domain::{OutputFormat, Stream};
 use tokio::{
     fs,
-    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
+    io::{AsyncBufReadExt, BufReader},
     process::Command,
+    time::{Instant, sleep_until, timeout},
 };
+
+/// A download that writes nothing new for this long has stalled and is stopped.
+pub const STALL_AFTER: Duration = Duration::from_secs(90);
+
+/// ffmpeg gives up on a connection that sends nothing for this long, in microseconds.
+/// Without it ffmpeg waits forever on a connection that went quiet. Shorter than
+/// [`STALL_AFTER`], so ffmpeg's own error, which names the cause, usually comes first.
+const READ_TIMEOUT_MICROS: &str = "30000000";
+
+/// What ffmpeg logs when it cannot fetch a part of an HLS stream. It then leaves the part
+/// out and goes on, so the file would have a gap.
+const LOST_SEGMENT: &str = "Failed to open segment";
+
+/// A file may end this far before the stated length, e.g. when the audio is a little shorter.
+const MAY_MISS: f64 = 0.05;
+const MAY_MISS_SECONDS: f64 = 30.0;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DownloadError {
@@ -25,6 +43,25 @@ pub enum DownloadError {
     Io(#[from] std::io::Error),
     #[error("ffmpeg failed: {0}")]
     Ffmpeg(String),
+    /// The connection stayed open but no data arrived.
+    #[error("the download stalled: nothing arrived for {0} seconds")]
+    Stalled(u64),
+    #[error("the stream ended early, at {0}% of its length")]
+    Incomplete(u8),
+    /// The hoster did not hand out a part in the middle, e.g. with a 404.
+    #[error("a part of the stream could not be fetched")]
+    MissingPart,
+}
+
+impl DownloadError {
+    /// Whether the same episode may work with a freshly resolved stream: the stream failed,
+    /// not this machine.
+    pub fn is_stream_failure(&self) -> bool {
+        matches!(
+            self,
+            Self::Ffmpeg(_) | Self::Stalled(_) | Self::Incomplete(_) | Self::MissingPart
+        )
+    }
 }
 
 pub type Result<T> = std::result::Result<T, DownloadError>;
@@ -40,7 +77,8 @@ pub struct Progress {
 /// Downloads `stream` to `target` as Matroska without re-encoding.
 ///
 /// The data goes to `<target>.part` first, so `target` only ever holds a complete file.
-/// Dropping the returned future stops ffmpeg and removes the partial file.
+/// Dropping the returned future stops ffmpeg and removes the partial file. A download that
+/// stalls or ends early fails instead of hanging or leaving a short file.
 pub async fn download(
     stream: &Stream,
     target: &Path,
@@ -51,7 +89,8 @@ pub async fn download(
     if !stream.url.starts_with("https://") && !stream.url.starts_with("http://") {
         return Err(DownloadError::BadUrl(stream.url.clone()));
     }
-    let mut input = Vec::new();
+    // Applies to the playlist and to every segment request.
+    let mut input = vec!["-rw_timeout".to_owned(), READ_TIMEOUT_MICROS.to_owned()];
     if !stream.headers.is_empty() {
         let headers = stream
             .headers
@@ -60,7 +99,7 @@ pub async fn download(
         input.extend(["-headers".to_owned(), headers.collect()]);
     }
     input.extend(["-i".to_owned(), stream.url.clone()]);
-    run(&input, target, format, on_progress).await
+    run(&input, target, format, STALL_AFTER, on_progress).await
 }
 
 /// Removes the partial file when a download fails or is dropped. After a successful rename
@@ -77,6 +116,7 @@ async fn run(
     input: &[String],
     target: &Path,
     format: OutputFormat,
+    stall_after: Duration,
     mut on_progress: impl FnMut(Progress),
 ) -> Result<()> {
     // ffmpeg cannot tell the container from the `.part` name, so it is named here.
@@ -84,7 +124,10 @@ async fn run(
         OutputFormat::Mkv => "matroska",
         OutputFormat::Mp4 => "mp4",
     };
-    let duration = probe_duration(input).await;
+    // ffprobe can hang on a quiet connection like ffmpeg; then the length stays unknown.
+    let duration = timeout(stall_after, probe_duration(input))
+        .await
+        .unwrap_or(None);
     if let Some(dir) = target.parent() {
         fs::create_dir_all(dir).await?;
     }
@@ -93,7 +136,14 @@ async fn run(
     let part = PartFile(part.into());
 
     let mut ffmpeg = Command::new("ffmpeg")
-        .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y"])
+        // Warnings are read too: a part of the stream that could not be fetched is only one.
+        .args([
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "level+warning",
+            "-y",
+        ])
         .args(["-progress", "pipe:1", "-nostats"])
         .args(input)
         .args(["-c", "copy", "-f", container])
@@ -105,27 +155,81 @@ async fn run(
         .spawn()
         .map_err(|err| DownloadError::Spawn("ffmpeg", err))?;
     let stdout = ffmpeg.stdout.take().expect("stdout was set to piped");
-    let mut stderr = ffmpeg.stderr.take().expect("stderr was set to piped");
+    let stderr = ffmpeg.stderr.take().expect("stderr was set to piped");
+    let mut reports = BufReader::new(stdout).lines();
+    let mut messages = BufReader::new(stderr).lines();
+    let (mut reporting, mut messaging) = (true, true);
 
-    let report = async {
-        let mut parser = ProgressParser::new(duration);
-        let mut lines = BufReader::new(stdout).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            if let Some(progress) = parser.line(&line) {
-                on_progress(progress);
+    let mut parser = ProgressParser::new(duration);
+    let mut position = parser.position();
+    let mut deadline = Instant::now() + stall_after;
+    let mut error = None;
+    // Both pipes are drained together, or ffmpeg stalls once one of them is full.
+    let stopped = loop {
+        tokio::select! {
+            line = reports.next_line(), if reporting => match line {
+                Ok(Some(line)) => {
+                    if let Some(progress) = parser.line(&line) {
+                        on_progress(progress);
+                    }
+                    // Newer ffmpeg versions keep reporting while they wait for data, so
+                    // only a report that got further than the last one counts.
+                    if parser.position() != position {
+                        position = parser.position();
+                        deadline = Instant::now() + stall_after;
+                    }
+                }
+                _ => reporting = false,
+            },
+            line = messages.next_line(), if messaging => match line {
+                Ok(Some(line)) if line.contains(LOST_SEGMENT) => {
+                    break Some(DownloadError::MissingPart);
+                }
+                Ok(Some(line)) => {
+                    if let Some(message) = error_message(&line) {
+                        error = Some(message.to_owned());
+                    }
+                }
+                _ => messaging = false,
+            },
+            () = sleep_until(deadline), if reporting || messaging => {
+                break Some(DownloadError::Stalled(stall_after.as_secs()));
             }
+            else => break None,
         }
     };
-    // Both pipes are drained together, or ffmpeg stalls once one of them is full.
-    let mut errors = String::new();
-    let _ = tokio::join!(report, stderr.read_to_string(&mut errors));
+    if let Some(reason) = stopped {
+        let _ = ffmpeg.start_kill();
+        ffmpeg.wait().await?;
+        return Err(reason);
+    }
 
     if !ffmpeg.wait().await?.success() {
-        let reason = errors.lines().last().unwrap_or("no error message");
-        return Err(DownloadError::Ffmpeg(reason.to_owned()));
+        let reason = error.unwrap_or_else(|| "no error message".to_owned());
+        return Err(DownloadError::Ffmpeg(reason));
+    }
+    let last = parser.current;
+    if let Some(percent) = duration.and_then(|duration| ended_early(duration, last.fraction)) {
+        return Err(DownloadError::Incomplete(percent));
     }
     fs::rename(&part.0, target).await?;
     Ok(())
+}
+
+/// The text of an error line of ffmpeg's log, without the `[error]` label. Warnings are
+/// not errors.
+fn error_message(line: &str) -> Option<&str> {
+    ["[error] ", "[fatal] "].iter().find_map(|label| {
+        let (_, message) = line.split_once(label)?;
+        Some(message.trim())
+    })
+}
+
+/// The percentage a download reached, when it stopped well short of the stream's length.
+fn ended_early(duration: f64, fraction: f64) -> Option<u8> {
+    let missing = 1.0 - fraction;
+    (missing > MAY_MISS && missing * duration > MAY_MISS_SECONDS)
+        .then_some((fraction * 100.0) as u8)
 }
 
 /// Length of the input in seconds, if it states one.
@@ -147,6 +251,8 @@ async fn probe_duration(input: &[String]) -> Option<f64> {
 struct ProgressParser {
     duration: Option<f64>,
     current: Progress,
+    /// Microseconds of video written so far.
+    written: i64,
 }
 
 impl ProgressParser {
@@ -154,7 +260,13 @@ impl ProgressParser {
         Self {
             duration,
             current: Progress::default(),
+            written: 0,
         }
+    }
+
+    /// How far the download is; unchanged for as long as nothing new was written.
+    fn position(&self) -> (u64, i64) {
+        (self.current.bytes, self.written)
     }
 
     fn line(&mut self, line: &str) -> Option<Progress> {
@@ -167,8 +279,11 @@ impl ProgressParser {
             }
             // "N/A" until the first packet is written.
             "out_time_us" => {
-                if let (Ok(micros), Some(duration)) = (value.parse::<f64>(), self.duration) {
-                    self.current.fraction = (micros / 1e6 / duration).clamp(0.0, 1.0);
+                if let Ok(micros) = value.parse::<i64>() {
+                    self.written = micros;
+                    if let Some(duration) = self.duration {
+                        self.current.fraction = (micros as f64 / 1e6 / duration).clamp(0.0, 1.0);
+                    }
                 }
             }
             "progress" => return Some(self.current),
@@ -180,9 +295,10 @@ impl ProgressParser {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
+
+    /// Longer than any test download takes.
+    const PATIENT: Duration = Duration::from_secs(60);
 
     #[test]
     fn progress_lines_become_reports() {
@@ -267,6 +383,7 @@ progress=end
             &input(&sample(dir.path())),
             &target,
             OutputFormat::Mkv,
+            PATIENT,
             |progress| reports.push(progress),
         )
         .await
@@ -286,6 +403,7 @@ progress=end
             &input(&sample(dir.path())),
             &target,
             OutputFormat::Mp4,
+            PATIENT,
             |_| {},
         )
         .await
@@ -310,6 +428,7 @@ progress=end
             &input(&dir.path().join("missing.mkv")),
             &target,
             OutputFormat::Mkv,
+            PATIENT,
             |_| {},
         )
         .await;
@@ -331,13 +450,118 @@ progress=end
 
         let started = tokio::time::timeout(
             Duration::from_millis(500),
-            run(&slow, &target, OutputFormat::Mkv, |_| {}),
+            run(&slow, &target, OutputFormat::Mkv, PATIENT, |_| {}),
         )
         .await;
 
         assert!(started.is_err(), "the download finished: {started:?}");
         assert!(!target.exists());
         assert!(!dir.path().join("out.mkv.part").exists());
+    }
+
+    #[tokio::test]
+    async fn a_download_that_gets_no_data_fails_instead_of_hanging() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("out.mkv");
+        // A pipe that is open for writing but never written to: ffmpeg waits on it the way
+        // it waits on a connection that went quiet.
+        let pipe = dir.path().join("quiet");
+        let made = std::process::Command::new("mkfifo").arg(&pipe).status();
+        assert!(made.unwrap().success());
+        let _writer = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&pipe)
+            .unwrap();
+
+        let result = timeout(
+            Duration::from_secs(20),
+            run(
+                &input(&pipe),
+                &target,
+                OutputFormat::Mkv,
+                Duration::from_millis(300),
+                |_| {},
+            ),
+        )
+        .await
+        .expect("the stalled download was stopped");
+
+        assert!(
+            matches!(result, Err(DownloadError::Stalled(_))),
+            "{result:?}"
+        );
+        assert!(!target.exists());
+        assert!(!dir.path().join("out.mkv.part").exists());
+    }
+
+    #[test]
+    fn a_download_that_ends_well_before_the_stated_length_ended_early() {
+        // A 24-minute episode that stopped at 60%.
+        assert_eq!(ended_early(1440.0, 0.6), Some(60));
+        // The last seconds may be missing, and a short clip may miss a larger share.
+        assert_eq!(ended_early(1440.0, 0.99), None);
+        assert_eq!(ended_early(20.0, 0.5), None);
+    }
+
+    #[tokio::test]
+    async fn a_stream_with_a_missing_part_is_not_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("out.mkv");
+        let segment = dir.path().join("part0.ts");
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-loglevel", "error", "-f", "lavfi", "-i"])
+            .args([
+                "testsrc=duration=2:size=64x64:rate=10",
+                "-c:v",
+                "mpeg2video",
+            ])
+            .arg(&segment)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        // The second part does not exist, the way a hoster answers 404 for it.
+        let playlist = dir.path().join("index.m3u8");
+        std::fs::write(
+            &playlist,
+            "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\npart0.ts\n#EXTINF:2,\npart1.ts\n\
+             #EXTINF:2,\npart0.ts\n#EXT-X-ENDLIST\n",
+        )
+        .unwrap();
+
+        let result = run(
+            &input(&playlist),
+            &target,
+            OutputFormat::Mkv,
+            PATIENT,
+            |_| {},
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(DownloadError::MissingPart)),
+            "{result:?}"
+        );
+        assert!(!target.exists());
+        assert!(!dir.path().join("out.mkv.part").exists());
+    }
+
+    #[test]
+    fn only_error_lines_of_the_log_are_errors() {
+        assert_eq!(
+            error_message(
+                "[in#0 @ 0x55] [error] Error opening input: Server returned 404 Not Found"
+            ),
+            Some("Error opening input: Server returned 404 Not Found")
+        );
+        assert_eq!(
+            error_message("[fatal] Error opening input files: Connection timed out"),
+            Some("Error opening input files: Connection timed out")
+        );
+        assert_eq!(
+            error_message("[http @ 0x55] [warning] HTTP error 404 Not Found"),
+            None
+        );
     }
 
     #[tokio::test]

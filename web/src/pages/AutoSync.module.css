@@ -8,3 +8,20 @@
   margin-top: 24px;
   font-size: var(--size-s);
 }
+
+/* Phones: the title on its own line, the last check and Remove below it. */
+@media (max-width: 720px) {
+  .bar {
+    justify-content: center;
+  }
+
+  .tracked > div {
+    flex: 0 0 100%;
+  }
+
+  .tracked > span {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--size-s);
+  }
+}

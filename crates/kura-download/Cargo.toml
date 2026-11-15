@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 kura-domain.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["process", "io-util", "fs"] }
+tokio = { workspace = true, features = ["process", "io-util", "fs", "time"] }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -126,8 +126,9 @@ impl Site for FailingSite {
     }
 }
 
-/// Resolves a link to itself, unless the link says the video is gone.
-struct FakeHoster(&'static str);
+/// Resolves a link to itself, unless the link says the video is gone. A "flaky" link gets a
+/// new stream address every time it is resolved: `#1`, `#2` and so on.
+struct FakeHoster(&'static str, std::sync::atomic::AtomicU32);
 
 #[async_trait]
 impl Hoster for FakeHoster {
@@ -139,14 +140,20 @@ impl Hoster for FakeHoster {
         if url.contains("gone") {
             return Err(HosterError::NoStream("fake"));
         }
+        let mut url = url.to_owned();
+        if url.contains("flaky") {
+            let resolved = self.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            url = format!("{url}#{resolved}");
+        }
         Ok(Stream {
-            url: url.to_owned(),
+            url,
             headers: Vec::new(),
         })
     }
 }
 
-/// Fails on "broken" streams, never finishes "slow" ones, and records the rest.
+/// Fails on "broken" streams and on the first address of a "flaky" one, never finishes
+/// "slow" ones, and records the rest.
 #[derive(Default)]
 struct FakeDownload(Arc<Mutex<Vec<(String, PathBuf)>>>);
 
@@ -165,6 +172,11 @@ impl Download for FakeDownload {
         });
         if stream.url.contains("broken") {
             return Err(DownloadError::Ffmpeg("stream ended early".to_owned()));
+        }
+        if stream.url.ends_with("flaky#1") {
+            return Err(DownloadError::Ffmpeg(
+                "Server returned 404 Not Found".to_owned(),
+            ));
         }
         if stream.url.contains("slow") {
             std::future::pending::<()>().await;
@@ -229,7 +241,10 @@ fn setup(links: Vec<HosterLink>, parallel: u8) -> Setup {
     let core = Core::new(
         store,
         vec![Arc::new(FakeSite(links)), Arc::new(FailingSite)],
-        vec![Box::new(FakeHoster("voe")), Box::new(FakeHoster("vidmoly"))],
+        vec![
+            Box::new(FakeHoster("voe", Default::default())),
+            Box::new(FakeHoster("vidmoly", Default::default())),
+        ],
         Box::new(downloader),
     );
     tokio::spawn(core.clone().run());
@@ -360,7 +375,7 @@ async fn a_failed_download_lists_every_attempt_and_can_be_retried() {
         jobs[0].error.as_deref(),
         Some(
             "voe, german_dub: no stream found on the fake page; \
-             vidmoly, german_dub: ffmpeg failed: stream ended early"
+             vidmoly, german_dub: ffmpeg failed: stream ended early (tried 3 times)"
         )
     );
 
@@ -374,6 +389,33 @@ async fn a_failed_download_lists_every_attempt_and_can_be_retried() {
     // Clearing takes it off the queue page but keeps the record.
     assert_eq!(s.core.clear_finished().unwrap(), 1);
     assert!(s.core.jobs().unwrap()[0].hidden);
+}
+
+#[tokio::test]
+async fn a_stream_that_fails_is_resolved_again_before_the_next_hoster_is_tried() {
+    let s = setup(
+        vec![
+            link(Language::GermanDub, "voe", "https://voe/flaky"),
+            link(Language::GermanDub, "vidmoly", "https://vidmoly/dub"),
+        ],
+        1,
+    );
+    let mut events = s.core.subscribe();
+    s.queue(first(), Choices::default()).await.unwrap();
+    let jobs = states(&s.core, &[JobState::Done]).await;
+
+    // The second address VOE handed out worked, so Vidmoly was never asked.
+    assert_eq!(s.downloads.lock().unwrap()[0].0, "https://voe/flaky#2");
+
+    // The failed try reported 50%; the bar went back to nothing before the next try.
+    let mut fractions = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if let Event::Progress { id, fraction, .. } = event {
+            assert_eq!(id, jobs[0].id);
+            fractions.push(fraction);
+        }
+    }
+    assert_eq!(fractions, [0.5, 0.0, 0.5]);
 }
 
 #[tokio::test]

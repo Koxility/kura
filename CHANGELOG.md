@@ -4,6 +4,22 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-11-15
+
+### Fixed
+
+- A download that fails on the stream, like VOE answering 404, is tried again by itself. The stream addresses a hoster hands out expire and name one server, and Kura asked for one only once per link. Now it asks for a fresh address and tries up to three times before it moves on to the next provider or language. The error shows what the hoster answered and that it was tried three times.
+- Downloads no longer hang at some percentage. ffmpeg waited without limit on a connection that went quiet. Now it gives up on a connection after 30 seconds, and Kura stops a download that got no further for 90 seconds; both count as a failed try and start again from a fresh address.
+- A download whose stream is missing a part, or ends well before its stated length, fails and is tried again. ffmpeg leaves such parts out and reports success, so the episode was saved as done with a gap or cut short.
+- The progress bar goes back to the start when a download starts over, instead of staying at the last value.
+- The queue page catches up by itself. It reads the queue again when the live connection comes back, e.g. after a phone woke up or Kura restarted, reconnects when the browser gave up, checks every 15 seconds while something is downloading, and shows the result of Cancel and Retry at once.
+- The app is usable on phones:
+  - The page links have their own line under the name, so every page can be reached; Logout stays in view.
+  - Queue: an error has the full width below its episode instead of a column one letter wide.
+  - A title's page: episode titles and languages no longer overlap; the languages go below the title.
+  - Auto-Sync, Library and Settings: long titles and paths wrap onto their own line.
+  - Text fields no longer make iPhones zoom in.
+
 ## [1.2.4] - 2026-11-15
 
 ### Added
@@ -127,7 +143,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.4...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.5...HEAD
+[1.2.5]: https://github.com/Koxility/kura/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/Koxility/kura/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/Koxility/kura/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/Koxility/kura/compare/v1.2.1...v1.2.2

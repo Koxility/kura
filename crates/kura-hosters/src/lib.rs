@@ -16,9 +16,20 @@ pub use voe::Voe;
 pub enum HosterError {
     #[error("request failed: {0}")]
     Http(#[from] reqwest::Error),
+    /// The hoster refused the page, e.g. 404 for a removed video or 503 while it is busy.
+    #[error("the hoster answered {0}")]
+    Status(reqwest::StatusCode),
     /// The video was removed or the hoster changed its player page.
     #[error("no stream found on the {0} page")]
     NoStream(&'static str),
+}
+
+impl HosterError {
+    /// Whether asking again may work. Hosters also answer 404 for a moment for videos that
+    /// are there, so only a page without a stream is final.
+    pub fn is_temporary(&self) -> bool {
+        !matches!(self, Self::NoStream(_))
+    }
 }
 
 pub type Result<T> = std::result::Result<T, HosterError>;
@@ -41,13 +52,11 @@ pub fn all(http: &reqwest::Client) -> Vec<Box<dyn Hoster>> {
 }
 
 async fn get(http: &reqwest::Client, url: &str) -> Result<String> {
-    Ok(http
-        .get(url)
-        .send()
-        .await?
-        .error_for_status()?
-        .text()
-        .await?)
+    let answer = http.get(url).send().await?;
+    if !answer.status().is_success() {
+        return Err(HosterError::Status(answer.status()));
+    }
+    Ok(answer.text().await?)
 }
 
 #[cfg(test)]
