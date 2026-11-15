@@ -61,3 +61,21 @@ button.entry:hover {
   text-align: right;
   overflow-wrap: anywhere;
 }
+
+@media (max-width: 720px) {
+  .entry {
+    flex-wrap: wrap;
+    gap: 2px 10px;
+  }
+
+  .name {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .detail {
+    flex: 0 0 100%;
+    padding-left: 22px;
+    text-align: left;
+  }
+}

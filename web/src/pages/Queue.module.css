@@ -43,3 +43,20 @@
 .episodes > li {
   padding: 8px 0;
 }
+
+.message > p {
+  margin: 0;
+}
+
+/* Phones: code, language, state and button on one line; the error or the speed below. */
+@media (max-width: 720px) {
+  .episodes {
+    padding-left: 0;
+  }
+
+  .message:not(:empty),
+  .stats {
+    order: 1;
+    flex: 0 0 100%;
+  }
+}

@@ -83,6 +83,7 @@ function Shell({ status }: { status: Status }) {
           )}
         </div>
         <nav className={styles.nav} aria-label="Main">
+          <div className={styles.links}>
           {pages
             .filter((page) => admin || !page.admin)
             .map((page) => (
@@ -95,6 +96,7 @@ function Shell({ status }: { status: Status }) {
                 )}
               </NavLink>
             ))}
+          </div>
           <a
             className={styles.icon}
             href={status.repository}
@@ -162,9 +164,27 @@ function Pages({ needsLibrary, user }: { needsLibrary: boolean; user: User }) {
 function useLiveQueue() {
   const client = useQueryClient();
   useEffect(() => {
-    const source = new EventSource("/api/v1/events");
     const seen = new Map<number, { bytes: number; at: number }>();
-    source.onmessage = (message) => {
+    let source: EventSource;
+    let reconnect: number | undefined;
+    const connect = () => {
+      source = new EventSource("/api/v1/events");
+      // Events sent while the stream was down are lost, e.g. while a phone slept, so every
+      // new connection reads the queue again.
+      source.onopen = () => {
+        seen.clear();
+        client.invalidateQueries({ queryKey: ["queue"] });
+      };
+      // The browser reconnects by itself after a dropped connection, but gives up for good
+      // when the server answers with an error, e.g. a proxy while Kura restarts.
+      source.onerror = () => {
+        if (source.readyState !== EventSource.CLOSED) return;
+        window.clearTimeout(reconnect);
+        reconnect = window.setTimeout(connect, 5000);
+      };
+      source.onmessage = onMessage;
+    };
+    const onMessage = (message: MessageEvent<string>) => {
       const event = JSON.parse(message.data) as LiveEvent;
       if (event.type === "queue_changed") {
         client.invalidateQueries({ queryKey: ["queue"] });
@@ -189,6 +209,10 @@ function useLiveQueue() {
         ),
       );
     };
-    return () => source.close();
+    connect();
+    return () => {
+      window.clearTimeout(reconnect);
+      source.close();
+    };
   }, [client]);
 }

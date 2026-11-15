@@ -132,6 +132,48 @@
   .cover {
     width: 120px;
   }
+
+  .tree {
+    margin-top: 32px;
+  }
+
+  .seasonToggle {
+    gap: 8px;
+    white-space: nowrap;
+  }
+
+  .seasonToggle > span:not(:first-child, :nth-child(2)) {
+    font-size: var(--size-s);
+  }
+
+  /* The box alone; its label stays for screen readers. */
+  .wholeLabel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .wholeCheck {
+    padding: 14px 6px 14px 12px;
+  }
+
+  /* The languages go below the title instead of squeezing it. */
+  .episode {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+
+  .episode > :last-child:not(:first-child) {
+    flex: 0 0 100%;
+    padding-left: 58px;
+  }
+
+  .options > label {
+    width: 100%;
+  }
 }
 
 /* Room for the downloaded mark left of every episode, filled or not, so rows line up. */

@@ -178,7 +178,16 @@ export async function api<T>(path: string, method = "GET", body?: unknown): Prom
   return data as T;
 }
 
-export const jobsQuery = { queryKey: ["queue"], queryFn: () => api<Job[]>("/queue") };
+export const jobsQuery = {
+  queryKey: ["queue"],
+  queryFn: () => api<Job[]>("/queue"),
+  // Live events keep the queue current; this catches what they miss while something is
+  // downloading or waiting.
+  refetchInterval: (query: { state: { data?: Job[] } }) =>
+    query.state.data?.some((job) => job.state === "queued" || job.state === "running")
+      ? 15_000
+      : false,
+};
 export const statusQuery = {
   queryKey: ["status"],
   queryFn: () => api<Status>("/status"),

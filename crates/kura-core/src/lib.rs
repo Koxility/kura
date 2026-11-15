@@ -168,6 +168,14 @@ pub struct Core {
 /// When a site's full list was fetched, and the list.
 type Catalog = (Instant, Arc<Vec<SeriesSummary>>);
 
+/// How often one link is tried before the next hoster or language gets its turn. Every try
+/// asks the hoster for the stream again: its addresses expire and name one server, so a
+/// stream that answers 404 or stalls often works from a fresh address.
+const TRIES: u32 = 3;
+
+/// The wait before the second try; the third waits twice as long. None in tests.
+const RETRY_PAUSE: Duration = Duration::from_secs(if cfg!(test) { 0 } else { 5 });
+
 /// The full lists are megabytes of HTML, so one fetch serves an hour of random picks.
 const CATALOG_TTL: Duration = Duration::from_secs(60 * 60);
 
@@ -608,6 +616,8 @@ impl Core {
         }
     }
 
+    /// Downloads one link, again from a fresh stream address when the hoster or the stream
+    /// failed in a way that may pass.
     async fn fetch(
         &self,
         id: i64,
@@ -616,21 +626,57 @@ impl Core {
         target: &Path,
         format: OutputFormat,
     ) -> std::result::Result<(), String> {
+        let mut tried = 1;
+        loop {
+            let (reason, temporary) = match self.attempt(id, hoster, link, target, format).await {
+                Ok(()) => return Ok(()),
+                Err(failure) => failure,
+            };
+            // The failed try may have got halfway; the next one starts from nothing.
+            self.report(id, Progress::default());
+            if !temporary {
+                return Err(reason);
+            }
+            if tried == TRIES {
+                return Err(format!("{reason} (tried {TRIES} times)"));
+            }
+            tracing::warn!(
+                "download {id}: try {tried} of {TRIES} on {} failed, trying again: {reason}",
+                hoster.name()
+            );
+            tokio::time::sleep(RETRY_PAUSE * tried).await;
+            tried += 1;
+        }
+    }
+
+    /// One try: resolves the link and downloads the stream. The error says why it failed and
+    /// whether another try may work.
+    async fn attempt(
+        &self,
+        id: i64,
+        hoster: &dyn Hoster,
+        link: &HosterLink,
+        target: &Path,
+        format: OutputFormat,
+    ) -> std::result::Result<(), (String, bool)> {
         let stream = hoster.resolve(&link.url).await;
-        let stream = stream.map_err(|err| err.to_string())?;
-        let mut report = |progress: Progress| {
-            // A lost progress update is harmless; the next one follows within a second.
-            let _ = self.store.set_progress(id, progress.fraction);
-            let _ = self.events.send(Event::Progress {
-                id,
-                fraction: progress.fraction,
-                bytes: progress.bytes,
-            });
-        };
+        let stream = stream.map_err(|err| (err.to_string(), err.is_temporary()))?;
+        let mut report = |progress: Progress| self.report(id, progress);
         let done = self
             .downloader
             .download(&stream, target, format, &mut report);
-        done.await.map_err(|err| err.to_string())
+        done.await
+            .map_err(|err| (err.to_string(), err.is_stream_failure()))
+    }
+
+    fn report(&self, id: i64, progress: Progress) {
+        // A lost progress update is harmless; the next one follows within a second.
+        let _ = self.store.set_progress(id, progress.fraction);
+        let _ = self.events.send(Event::Progress {
+            id,
+            fraction: progress.fraction,
+            bytes: progress.bytes,
+        });
     }
 }
 

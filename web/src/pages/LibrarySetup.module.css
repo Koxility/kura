@@ -35,3 +35,9 @@
 .actions {
   justify-content: flex-end;
 }
+
+@media (max-width: 720px) {
+  .card {
+    padding: 20px;
+  }
+}

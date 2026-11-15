@@ -96,6 +96,9 @@
 
 /* The user name opens the password change. */
 .user {
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 6px 4px 6px 12px;
   border: 0;
   background: transparent;
@@ -131,10 +134,51 @@
   color: var(--text-2);
 }
 
+.links {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Phones: the name and the account on the first line, the pages on a second line that
+   scrolls sideways when they do not fit. */
 @media (max-width: 720px) {
   .bar {
-    gap: 12px;
+    flex-wrap: wrap;
+    gap: 0 12px;
+    height: auto;
     padding: 0 12px;
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .brand {
+    min-height: 48px;
+    align-items: center;
+  }
+
+  .nav {
+    display: contents;
+  }
+
+  .icon {
+    margin-left: auto;
+  }
+
+  .links {
+    order: 1;
+    flex: 0 0 calc(100% + 24px);
+    margin: 0 -12px;
+    padding: 0 12px 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .links::-webkit-scrollbar {
+    display: none;
+  }
+
+  .link {
+    padding: 8px 12px;
   }
 
   .main {

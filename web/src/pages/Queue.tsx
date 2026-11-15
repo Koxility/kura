@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   api,
@@ -77,6 +77,7 @@ function group(jobs: Job[]): Group[] {
 
 /** Everyone sees the queue; only admins change it. */
 export function Queue({ admin }: { admin: boolean }) {
+  const client = useQueryClient();
   const jobs = useQuery(jobsQuery);
   const [filter, setFilter] = useState<"all" | GroupState>("all");
   const [sort, setSort] = useState<Sort>("queue");
@@ -84,6 +85,8 @@ export function Queue({ admin }: { admin: boolean }) {
   const [open, setOpen] = useState<string[]>([]);
   const act = useMutation({
     mutationFn: (paths: string[]) => Promise.all(paths.map((path) => api(`/queue/${path}`, "POST"))),
+    // Shows the result also when the live event for it was missed.
+    onSettled: () => client.invalidateQueries({ queryKey: ["queue"] }),
   });
 
   // Cleared entries stay known to the server but are gone from this page.
@@ -286,11 +289,11 @@ function GroupRow({
             <li key={job.id} className={ui.row}>
               <span className={`${ui.mono} ${ui.muted}`}>{code(job)}</span>
               <span className={ui.muted}>{languageLabel(job.language)}</span>
-              <div className={ui.grow}>
+              <div className={`${ui.grow} ${styles.message}`}>
                 {job.state === "failed" && job.error && <p className={ui.error}>{job.error}</p>}
               </div>
               {job.state === "running" && (
-                <span className={`${ui.mono} ${ui.muted}`}>
+                <span className={`${ui.mono} ${ui.muted} ${styles.stats}`}>
                   {job.speed !== undefined && `${formatBytes(job.speed)}/s · `}
                   {job.bytes !== undefined && `${formatBytes(job.bytes)} · `}
                   {Math.round(job.progress * 100)}%

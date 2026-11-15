@@ -102,7 +102,7 @@ export function AutoSyncPage() {
       )}
       <ul className={ui.list}>
         {tracked.map((title) => (
-          <li key={`${title.site}/${title.slug}`} className={ui.row}>
+          <li key={`${title.site}/${title.slug}`} className={`${ui.row} ${styles.tracked}`}>
             <div className={ui.grow}>
               <Link to={`/series/${title.site}/${title.slug}`}>{title.title}</Link>{" "}
               <span className={ui.muted}>

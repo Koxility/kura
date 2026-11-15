@@ -236,7 +236,21 @@
 @media (max-width: 720px) {
   .row {
     flex-wrap: wrap;
-    gap: 8px 16px;
+    gap: 8px 12px;
+  }
+
+  /* iOS zooms into a field whose text is smaller than 16px. */
+  .input,
+  .compact {
+    font-size: 16px;
+  }
+
+  .toolbar .input {
+    max-width: none;
+  }
+
+  .dialog {
+    padding: 20px;
   }
 
   .grid {
