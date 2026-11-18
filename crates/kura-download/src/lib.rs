@@ -91,6 +91,11 @@ pub async fn download(
     }
     // Applies to the playlist and to every segment request.
     let mut input = vec!["-rw_timeout".to_owned(), READ_TIMEOUT_MICROS.to_owned()];
+    if is_hls(&stream.url) {
+        // Keeps the connection and opens the next part while the current one still loads, so
+        // the download does not wait between parts. Only the HLS reader knows these options.
+        input.extend(["-http_persistent", "1", "-http_multiple", "1"].map(String::from));
+    }
     if !stream.headers.is_empty() {
         let headers = stream
             .headers
@@ -100,6 +105,12 @@ pub async fn download(
     }
     input.extend(["-i".to_owned(), stream.url.clone()]);
     run(&input, target, format, STALL_AFTER, on_progress).await
+}
+
+/// Whether the address names an HLS playlist, which ffmpeg loads part by part.
+fn is_hls(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    path.to_ascii_lowercase().ends_with(".m3u8")
 }
 
 /// Removes the partial file when a download fails or is dropped. After a successful rename
@@ -204,11 +215,17 @@ async fn run(
         return Err(reason);
     }
 
+    let last = parser.current;
     if !ffmpeg.wait().await?.success() {
         let reason = error.unwrap_or_else(|| "no error message".to_owned());
-        return Err(DownloadError::Ffmpeg(reason));
+        // ffmpeg sometimes fails only at the very end, e.g. on the last part or while
+        // closing the file. A file that holds the whole stream is kept instead of being
+        // downloaded again.
+        if !holds_whole_stream(duration, last.fraction, &part.0).await {
+            return Err(DownloadError::Ffmpeg(reason));
+        }
+        tracing::warn!("ffmpeg failed after writing the whole stream, keeping the file: {reason}");
     }
-    let last = parser.current;
     if let Some(percent) = duration.and_then(|duration| ended_early(duration, last.fraction)) {
         return Err(DownloadError::Incomplete(percent));
     }
@@ -223,6 +240,20 @@ fn error_message(line: &str) -> Option<&str> {
         let (_, message) = line.split_once(label)?;
         Some(message.trim())
     })
+}
+
+/// Whether the written file is as long as the stream: the stream states its length, ffmpeg
+/// got to the end of it, and the file itself has about that length too.
+async fn holds_whole_stream(duration: Option<f64>, fraction: f64, file: &Path) -> bool {
+    let Some(duration) = duration else {
+        return false;
+    };
+    if fraction <= 0.0 || ended_early(duration, fraction).is_some() {
+        return false;
+    }
+    let input = ["-i".to_owned(), file.to_string_lossy().into_owned()];
+    let written = probe_duration(&input).await;
+    written.is_some_and(|written| ended_early(duration, written / duration).is_none())
 }
 
 /// The percentage a download reached, when it stopped well short of the stream's length.
@@ -493,6 +524,59 @@ progress=end
         );
         assert!(!target.exists());
         assert!(!dir.path().join("out.mkv.part").exists());
+    }
+
+    #[test]
+    fn only_hls_playlists_get_the_hls_options() {
+        assert!(is_hls(
+            "https://cdn.example/hls/abc/master.m3u8?t=token&s=1"
+        ));
+        assert!(is_hls("https://cdn.example/index.M3U8"));
+        assert!(!is_hls("https://cdn.example/video.mp4?file=a.m3u8"));
+        assert!(!is_hls("https://cdn.example/video.mp4"));
+    }
+
+    #[tokio::test]
+    async fn an_hls_stream_downloads_with_the_hls_options() {
+        let dir = tempfile::tempdir().unwrap();
+        let playlist = dir.path().join("list.m3u8");
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-loglevel", "error", "-f", "lavfi", "-i"])
+            .args([
+                "testsrc=duration=4:size=64x64:rate=10",
+                "-c:v",
+                "mpeg2video",
+            ])
+            .args(["-f", "hls", "-hls_time", "1", "-hls_list_size", "0"])
+            .arg(&playlist)
+            .status()
+            .expect("the tests need ffmpeg");
+        assert!(made.success());
+        let target = dir.path().join("out.mkv");
+        let mut options = ["-http_persistent", "1", "-http_multiple", "1"]
+            .map(String::from)
+            .to_vec();
+        options.extend(input(&playlist));
+
+        run(&options, &target, OutputFormat::Mkv, PATIENT, |_| {})
+            .await
+            .unwrap();
+        let length = probe_duration(&input(&target)).await.unwrap();
+        assert!(length > 3.5, "{length}");
+    }
+
+    #[tokio::test]
+    async fn a_file_is_kept_after_a_late_error_only_when_it_holds_the_whole_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = sample(dir.path());
+        // The sample is two seconds long.
+        assert!(holds_whole_stream(Some(2.0), 1.0, &file).await);
+        // ffmpeg did not get to the end, or the length is unknown.
+        assert!(!holds_whole_stream(Some(1440.0), 0.5, &file).await);
+        assert!(!holds_whole_stream(None, 1.0, &file).await);
+        // ffmpeg reported the end, but the file is far shorter than the stream.
+        assert!(!holds_whole_stream(Some(1440.0), 1.0, &file).await);
+        assert!(!holds_whole_stream(Some(2.0), 1.0, &dir.path().join("missing.mkv")).await);
     }
 
     #[test]

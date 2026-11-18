@@ -407,15 +407,37 @@ async fn a_stream_that_fails_is_resolved_again_before_the_next_hoster_is_tried()
     // The second address VOE handed out worked, so Vidmoly was never asked.
     assert_eq!(s.downloads.lock().unwrap()[0].0, "https://voe/flaky#2");
 
-    // The failed try reported 50%; the bar went back to nothing before the next try.
-    let mut fractions = Vec::new();
+    // The failed try reported 50%; the bar went back to nothing before the next try, and
+    // the queue was told so it can show why the download starts again.
+    let mut seen = Vec::new();
     while let Ok(event) = events.try_recv() {
-        if let Event::Progress { id, fraction, .. } = event {
-            assert_eq!(id, jobs[0].id);
-            fractions.push(fraction);
+        match event {
+            Event::Progress { id, fraction, .. } => {
+                assert_eq!(id, jobs[0].id);
+                seen.push(format!("{fraction}"));
+            }
+            Event::QueueChanged => seen.push("changed".to_owned()),
+            Event::RequestsChanged => {}
         }
     }
-    assert_eq!(fractions, [0.5, 0.0, 0.5]);
+    seen.dedup();
+    assert_eq!(seen, ["changed", "0.5", "0", "changed", "0.5", "changed"]);
+    // The note of the failed try is gone once the download worked.
+    assert_eq!(jobs[0].error, None);
+}
+
+#[tokio::test]
+async fn a_download_that_starts_over_says_why() {
+    let s = setup(
+        vec![link(Language::GermanDub, "voe", "https://voe/broken")],
+        1,
+    );
+    s.queue(first(), Choices::default()).await.unwrap();
+    let jobs = states(&s.core, &[JobState::Failed]).await;
+    // Every try failed; the final error lists them, not the note of a retry.
+    let error = jobs[0].error.as_deref().unwrap();
+    assert!(error.contains("tried 3 times"), "{error}");
+    assert!(!error.contains("trying again"), "{error}");
 }
 
 #[tokio::test]

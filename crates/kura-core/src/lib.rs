@@ -695,6 +695,10 @@ impl Core {
                 "download {id}: try {tried} of {TRIES} on {} failed, trying again: {reason}",
                 hoster.name()
             );
+            // Shown in the queue, so a download that starts over says why.
+            let note = format!("Try {tried} of {TRIES} failed, trying again: {reason}");
+            let _ = self.store.note_retry(id, &note);
+            let _ = self.events.send(Event::QueueChanged);
             tokio::time::sleep(RETRY_PAUSE * tried).await;
             tried += 1;
         }

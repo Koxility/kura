@@ -459,9 +459,14 @@ impl Store {
     /// the picked one (`None` for "follow the settings").
     pub fn finish(&self, id: i64, path: &str, language: Language) -> Result<()> {
         self.update_running(
-            "state = 'done', progress = 1, path = ?2, language = ?3",
+            "state = 'done', progress = 1, path = ?2, language = ?3, error = NULL",
             params![id, path, language.as_str()],
         )
+    }
+
+    /// Why a running download starts again, shown until it ends.
+    pub fn note_retry(&self, id: i64, note: &str) -> Result<()> {
+        self.update_running("progress = 0, error = ?2", params![id, note])
     }
 
     pub fn fail(&self, id: i64, error: &str) -> Result<()> {

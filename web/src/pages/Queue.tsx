@@ -57,6 +57,8 @@ const code = (job: Job) => episodeCode(job.episode.season, job.episode.number);
 /** Running episodes named in a title's summary; more are counted, so the line stays short. */
 const NAMED = 3;
 const isActive = (job: Job) => job.state === "queued" || job.state === "running";
+/** Running, but nothing written yet: looking up the stream, or waiting before a new try. */
+const starting = (job: Job) => job.progress === 0 && !job.bytes;
 
 function groupState(jobs: Job[]): GroupState {
   if (jobs.some(isActive)) return "active";
@@ -217,7 +219,7 @@ function GroupRow({
   const retryable = jobs.filter((job) => job.state === "failed" || job.state === "cancelled");
   // Finished episodes count whole, running ones by how far they are.
   const progress = (done + running.reduce((sum, job) => sum + job.progress, 0)) / jobs.length;
-  const speed = running.reduce((sum, job) => sum + (job.speed ?? 0), 0);
+  const speed = running.reduce((sum, job) => sum + Math.max(0, job.speed ?? 0), 0);
 
   const named = running.slice(0, NAMED).map(code).join(", ");
   const more = running.length > NAMED ? ` +${running.length - NAMED} more` : "";
@@ -298,12 +300,20 @@ function GroupRow({
               <span className={ui.muted}>{languageLabel(job.language, defaults)}</span>
               <div className={`${ui.grow} ${styles.message}`}>
                 {job.state === "failed" && job.error && <p className={ui.error}>{job.error}</p>}
+                {/* While running, the error says why the download started over. */}
+                {job.state === "running" && job.error && (
+                  <p className={`${ui.muted} ${ui.small}`}>{job.error}</p>
+                )}
               </div>
               {job.state === "running" && (
                 <span className={`${ui.mono} ${ui.muted} ${styles.stats}`}>
-                  {job.speed !== undefined && `${formatBytes(job.speed)}/s · `}
-                  {job.bytes !== undefined && `${formatBytes(job.bytes)} · `}
-                  {Math.round(job.progress * 100)}%
+                  {starting(job)
+                    ? job.error
+                      ? "Retrying…"
+                      : "Starting…"
+                    : `${job.speed !== undefined ? `${formatBytes(Math.max(0, job.speed))}/s · ` : ""}${
+                        job.bytes !== undefined ? `${formatBytes(job.bytes)} · ` : ""
+                      }${Math.round(job.progress * 100)}%`}
                 </span>
               )}
               <span className={stateStyles[job.state] ?? ui.muted}>{stateNames[job.state]}</span>

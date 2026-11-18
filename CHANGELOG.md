@@ -4,6 +4,19 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.2.9] - 2026-11-18
+
+### Fixed
+
+- A download no longer shows a negative speed like `-2925931638 B/s` when it starts over. When a try failed, the byte count went back to zero and the speed was worked out from that drop.
+- The speed no longer keeps falling to 0 B/s and jumping back. ffmpeg writes a stream part by part, so two reports in a row often had the same byte count; the speed is now the average over the last 10 seconds.
+- A finished file is no longer thrown away and downloaded again when ffmpeg fails only at the very end, e.g. on the last part or while closing the file. Kura keeps the file when ffmpeg reached the end of the stream and the file itself has the stream's full length; without a stated length it still tries again.
+
+### Changed
+
+- A download that starts over shows "Retrying…" and why, e.g. "Try 1 of 3 failed, trying again: …", instead of looking like a new download at 0%.
+- ffmpeg keeps the connection to the hoster and loads the next part of an HLS stream while the current one finishes (`-http_persistent 1 -http_multiple 1`), so it waits less between parts.
+
 ## [1.2.8] - 2026-11-18
 
 ### Fixed
@@ -183,7 +196,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.8...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.9...HEAD
+[1.2.9]: https://github.com/Koxility/kura/compare/v1.2.8...v1.2.9
 [1.2.8]: https://github.com/Koxility/kura/compare/v1.2.7...v1.2.8
 [1.2.7]: https://github.com/Koxility/kura/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/Koxility/kura/compare/v1.2.5...v1.2.6

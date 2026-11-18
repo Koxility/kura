@@ -160,11 +160,18 @@ function Pages({ needsLibrary, user }: { needsLibrary: boolean; user: User }) {
   );
 }
 
+/** The download speed is the average over this many milliseconds. */
+const SPEED_WINDOW = 10_000;
+/** No speed is shown before the reports span this long. */
+const SPEED_MIN_SPAN = 2_000;
+
 /** Keeps the cached queue current from the server's event stream. */
 function useLiveQueue() {
   const client = useQueryClient();
   useEffect(() => {
-    const seen = new Map<number, { bytes: number; at: number }>();
+    // Recent byte counts per download. ffmpeg writes a stream part by part, so two reports in
+    // a row often show the same count; the speed is taken over several seconds instead.
+    const seen = new Map<number, { bytes: number; at: number }[]>();
     let source: EventSource | undefined;
     let reconnect: number | undefined;
     const refresh = () => {
@@ -218,10 +225,18 @@ function useLiveQueue() {
         return;
       }
       const now = performance.now();
-      const last = seen.get(event.id);
-      seen.set(event.id, { bytes: event.bytes, at: now });
+      let samples = seen.get(event.id) ?? [];
+      // Fewer bytes than before: a new try started from nothing.
+      const restarted = samples.length > 0 && event.bytes < samples[samples.length - 1].bytes;
+      if (restarted) samples = [];
+      samples.push({ bytes: event.bytes, at: now });
+      samples = samples.filter((sample) => now - sample.at <= SPEED_WINDOW);
+      seen.set(event.id, samples);
+      const oldest = samples[0];
       const speed =
-        last && now > last.at ? ((event.bytes - last.bytes) * 1000) / (now - last.at) : undefined;
+        now - oldest.at >= SPEED_MIN_SPAN
+          ? ((event.bytes - oldest.bytes) * 1000) / (now - oldest.at)
+          : undefined;
       const jobs = client.getQueryData<Job[]>(["queue"]);
       const job = jobs?.find((job) => job.id === event.id);
       // Progress for a download the page does not show as running means a change was missed.
@@ -232,7 +247,12 @@ function useLiveQueue() {
       client.setQueryData<Job[]>(["queue"], (jobs) =>
         jobs?.map((job) =>
           job.id === event.id
-            ? { ...job, progress: event.fraction, bytes: event.bytes, speed: speed ?? job.speed }
+            ? {
+                ...job,
+                progress: event.fraction,
+                bytes: event.bytes,
+                speed: restarted ? undefined : (speed ?? job.speed),
+              }
             : job,
         ),
       );
