@@ -58,7 +58,7 @@ Kura matches library folders by IMDb ID or by title. If the folder has neither t
 
 ## "Too many wrong logins"
 
-After five wrong logins for a name from one address, the next try has to wait: 30 seconds at first, twice as long after every further wrong try, 15 minutes at most. The message says how long. Devices that are already logged in are not affected. Behind a reverse proxy all logins come from the proxy's address, so the wait applies to the name whoever tried.
+After five wrong logins for a name from one address, the next try has to wait: 30 seconds at first, twice as long after every further wrong try, 15 minutes at most. The message says how long. Devices that are already logged in are not affected. Behind a reverse proxy, set `KURA_TRUSTED_PROXIES` (see [[Docker Compose|Docker-Compose]]). Otherwise every login comes from the proxy's address, and wrong logins from anyone hold up everyone's logins to that name.
 
 ## Forgot the admin password
 

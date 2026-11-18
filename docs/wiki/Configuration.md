@@ -10,6 +10,7 @@ Kura is configured in two places: a few environment variables for where it runs,
 | `KURA_DATA` | `/data` / `data` | Folder for the database. |
 | `KURA_LIBRARY_DIR` | `/media` / `./downloads` | Folder the library setup suggests. |
 | `KURA_NAMING_TEMPLATE` | `{title} {episodenumber} {language}` | File name template while the settings set none. |
+| `KURA_TRUSTED_PROXIES` | none | Reverse proxies whose `X-Forwarded-For` Kura believes, e.g. `172.17.0.1` or `10.0.0.0/24, ::1`. See [[Docker Compose|Docker-Compose]]. |
 | `TZ` | UTC | Time zone for the daily Auto-Sync time. |
 
 ## Settings → Downloads

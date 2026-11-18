@@ -4,7 +4,10 @@
 use kura_domain::{Picked, Request, RequestState, SiteId};
 use kura_store::NewRequest;
 
-use crate::{Choices, Core, CoreError, Event, Result, Selection, auth::now};
+use crate::{Choices, Core, CoreError, Event, Result, Selection, auth::now, check_picked};
+
+/// Most requests one user may have waiting for an admin at the same time.
+pub const MOST_OPEN_REQUESTS: usize = 100;
 
 impl Core {
     /// Stores a request after the same checks a download gets. Returns its id.
@@ -20,6 +23,18 @@ impl Core {
         self.check_choices(choices)?;
         if !picked.all && picked.seasons.is_empty() && picked.episodes.is_empty() {
             return Err(CoreError::Invalid("nothing was selected"));
+        }
+        // Stored as asked: a request is as large as its selection, and every user may ask.
+        let (seasons, episodes) = check_picked(picked.seasons.clone(), picked.episodes.clone())?;
+        let picked = &Picked {
+            all: picked.all,
+            seasons,
+            episodes,
+        };
+        if self.store.open_requests(user_id)? >= MOST_OPEN_REQUESTS {
+            return Err(CoreError::Invalid(
+                "you have too many open requests; wait until an admin decides on some",
+            ));
         }
         let series = source.series(slug).await?;
         let id = self.store.create_request(&NewRequest {

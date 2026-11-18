@@ -4,6 +4,16 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Security
+
+- Behind a reverse proxy like HAProxy, wrong logins from one person no longer lock everyone else out. Kura saw every login as coming from the proxy, so five wrong passwords for `admin` from anywhere on the internet held up the real admin's logins for up to 15 minutes, again and again. The new setting `KURA_TRUSTED_PROXIES` names the proxy; Kura then counts by the address in `X-Forwarded-For`. The header is ignored from anyone else, so it cannot be made up.
+- Users can no longer flood the server with requests. A request could name hundreds of thousands of seasons: 1.6 MB each, stored with no limit, and accepting one fetched a page from the site for every season (250,000 fetches and 750,000 queued episodes in our test). One request now names up to 200 seasons or 5000 episodes, repeats are dropped, and a user can have up to 100 open requests. An oversized request stored before is refused when accepted, and stays open to be rejected.
+- Sites and hosters can no longer send Kura into the local network. A link or redirect from a site or hoster page made Kura fetch any address, e.g. the router or a NAS. Kura now fetches only from public addresses: names are checked every time they are looked up, addresses in links and redirects before they are used, and the stream address before ffmpeg gets it. Proxies set in `HTTPS_PROXY` and similar may still be local. ffmpeg fetches the parts of a stream by itself; those addresses cannot be checked.
+
+### Added
+
+- The login cookie is marked `Secure` when a trusted reverse proxy says the browser came over HTTPS (`X-Forwarded-Proto: https`).
+
 ## [1.2.6] - 2026-11-15
 
 ### Security

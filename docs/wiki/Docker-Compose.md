@@ -42,7 +42,39 @@ Both mapped folders must be writable for this user. If they are not, Kura cannot
 
 `"8787:8787"` means host port 8787 → container port 8787. To use another port on the host, change only the left side, e.g. `"9000:8787"`.
 
-Kura has no HTTPS of its own. To reach it from outside your home network, put it behind a reverse proxy (Caddy, Traefik, nginx) that adds HTTPS, or use a VPN. Do not expose port 8787 directly to the internet.
+Kura has no HTTPS of its own. To reach it from outside your home network, put it behind a reverse proxy (HAProxy, Caddy, Traefik, nginx) that adds HTTPS, or use a VPN. Do not expose port 8787 directly to the internet.
+
+### Behind a reverse proxy
+
+1. **Only the proxy reaches Kura.** If the proxy runs on the same machine, publish the port on the loopback address only: `"127.0.0.1:8787:8787"`. Otherwise allow port 8787 only from the proxy in the firewall.
+2. **The proxy tells Kura who is asking.** Every connection Kura sees comes from the proxy. To slow down wrong logins per person and not for everyone at once, the proxy sends the person's address in `X-Forwarded-For`, and `KURA_TRUSTED_PROXIES` names the proxy's address as Kura sees it. Without it, Kura ignores the header, because anyone can send one. If you don't know the address, log in once: Kura's log then names it (`a request from 172.17.0.1 names the address it was forwarded for…`). Only name addresses nobody else can connect from.
+3. **HTTPS only.** Redirect plain HTTP to HTTPS. When the proxy also sends `X-Forwarded-Proto: https`, Kura marks the login cookie `Secure`, so a browser never sends it over plain HTTP.
+
+HAProxy, with Kura on the same machine and port 8787 published as `127.0.0.1:8787:8787`:
+
+```
+frontend http
+    bind :80
+    http-request redirect scheme https
+
+frontend https
+    bind :443 ssl crt /etc/haproxy/certs/kura.pem
+    option forwardfor
+    http-request set-header X-Forwarded-Proto https
+    http-response set-header Strict-Transport-Security "max-age=31536000"
+    default_backend kura
+
+backend kura
+    timeout server 1h   # the live queue keeps one connection open
+    server kura 127.0.0.1:8787
+```
+
+and in the compose file:
+
+```yaml
+    environment:
+      KURA_TRUSTED_PROXIES: "172.17.0.1"   # the address from Kura's log, see step 2
+```
 
 ## environment
 
@@ -53,6 +85,7 @@ Kura has no HTTPS of its own. To reach it from outside your home network, put it
 | `KURA_LISTEN` | `0.0.0.0:8787` | Address and port inside the container. Normally left alone. |
 | `KURA_DATA` | `/data` | Folder for the database inside the container. Normally left alone. |
 | `KURA_LIBRARY_DIR` | `/media` | Folder the first-start library setup suggests. |
+| `KURA_TRUSTED_PROXIES` | none | Reverse proxies whose `X-Forwarded-For` is believed. See [Behind a reverse proxy](#behind-a-reverse-proxy). |
 
 ## volumes
 

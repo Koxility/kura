@@ -4,7 +4,7 @@
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{ConnectInfo, FromRequestParts, Path, Query, State},
     http::{
         HeaderMap, StatusCode, Uri,
@@ -30,15 +30,27 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};
 
+use crate::proxy::TrustedProxies;
+
 type App = State<Arc<Core>>;
 type ApiResult<T> = Result<T, ApiError>;
 
-/// Answers requests on `listener` until it fails.
-pub async fn serve(listener: tokio::net::TcpListener, core: Arc<Core>) -> std::io::Result<()> {
+/// Answers requests on `listener` until it fails. `proxies` are the reverse proxies whose
+/// `X-Forwarded-For` and `X-Forwarded-Proto` are believed.
+pub async fn serve(
+    listener: tokio::net::TcpListener,
+    core: Arc<Core>,
+    proxies: TrustedProxies,
+) -> std::io::Result<()> {
     // Logins need the address a connection comes from.
-    let app = router(core).into_make_service_with_connect_info::<SocketAddr>();
+    let app = router(core)
+        .layer(Extension(Arc::new(proxies)))
+        .into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app).await
 }
+
+/// Who is asking, as far as the connection and a trusted proxy tell.
+type Proxies = Extension<Arc<TrustedProxies>>;
 
 fn router(core: Arc<Core>) -> Router {
     let api = Router::new()
@@ -167,11 +179,15 @@ fn session_token(headers: &HeaderMap) -> Option<&str> {
         .find_map(|pair| pair.trim().strip_prefix(COOKIE_NAME)?.strip_prefix('='))
 }
 
-/// `SameSite=Strict` keeps other websites from acting with the session. `Secure` is left
-/// out because Kura usually runs on plain HTTP in a home network.
-fn session_cookie(token: &str, max_age: i64) -> [(axum::http::HeaderName, String); 1] {
-    let cookie =
-        format!("{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}");
+/// `SameSite=Strict` keeps other websites from acting with the session. `Secure`, which keeps
+/// the browser from sending it over plain HTTP, is only set when a trusted proxy says the
+/// person came over HTTPS: Kura usually runs on plain HTTP in a home network, where a
+/// `Secure` cookie would not be kept at all.
+fn session_cookie(token: &str, max_age: i64, https: bool) -> [(axum::http::HeaderName, String); 1] {
+    let secure = if https { "; Secure" } else { "" };
+    let cookie = format!(
+        "{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure}"
+    );
     [(SET_COOKIE, cookie)]
 }
 
@@ -223,24 +239,31 @@ fn suggested_library_path() -> Option<String> {
 async fn setup(
     State(core): App,
     from: ConnectInfo<SocketAddr>,
+    proxies: Proxies,
+    headers: HeaderMap,
     Json(form): Json<Credentials>,
 ) -> ApiResult<Response> {
     if core.setup(&form.name, &form.password).await?.is_none() {
         return Err(error(StatusCode::CONFLICT, "Kura is already set up"));
     }
-    login(State(core), from, Json(form)).await
+    login(State(core), from, proxies, headers, Json(form)).await
 }
 
 async fn login(
     State(core): App,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
+    Extension(proxies): Proxies,
+    headers: HeaderMap,
     Json(form): Json<Credentials>,
 ) -> ApiResult<Response> {
-    let logged_in = core.login(&form.name, &form.password, from.ip());
+    // Behind a reverse proxy the connection is the proxy's; the brake counts the person.
+    let client = proxies.client(from.ip(), &headers);
+    let logged_in = core.login(&form.name, &form.password, client.address);
     let Some((user, token)) = logged_in.await? else {
         return Err(error(StatusCode::UNAUTHORIZED, "wrong name or password"));
     };
-    Ok((session_cookie(&token, SESSION_TTL), Json(user)).into_response())
+    let cookie = session_cookie(&token, SESSION_TTL, client.https);
+    Ok((cookie, Json(user)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -266,9 +289,16 @@ async fn change_password(
     }
 }
 
-async fn logout(State(core): App, session: Session) -> ApiResult<Response> {
+async fn logout(
+    State(core): App,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    Extension(proxies): Proxies,
+    headers: HeaderMap,
+    session: Session,
+) -> ApiResult<Response> {
     core.logout(&session.token)?;
-    Ok((session_cookie("", 0), StatusCode::NO_CONTENT).into_response())
+    let https = proxies.client(from.ip(), &headers).https;
+    Ok((session_cookie("", 0, https), StatusCode::NO_CONTENT).into_response())
 }
 
 #[derive(Deserialize)]

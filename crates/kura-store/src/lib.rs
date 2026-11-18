@@ -342,6 +342,16 @@ impl Store {
         )?)
     }
 
+    /// How many of a user's requests wait for a decision.
+    pub fn open_requests(&self, user_id: i64) -> Result<usize> {
+        let count: i64 = self.conn().query_row(
+            "SELECT count(*) FROM requests WHERE user_id = ?1 AND state = 'open'",
+            [user_id],
+            |row| row.get(0),
+        )?;
+        Ok(usize::try_from(count).unwrap_or(usize::MAX))
+    }
+
     /// Open requests first, then the newest. With `user`, only that user's requests.
     pub fn requests(&self, user: Option<i64>) -> Result<Vec<Request>> {
         let conn = self.conn();

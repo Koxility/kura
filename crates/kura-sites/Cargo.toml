@@ -17,7 +17,7 @@ reqwest.workspace = true
 scraper.workspace = true
 serde.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["net"] }
 
 [dev-dependencies]
 serde_json.workspace = true

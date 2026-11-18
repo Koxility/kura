@@ -4,6 +4,7 @@
 //! functions, which the tests run against saved markup in `fixtures/`.
 
 mod aniworld;
+pub mod guard;
 mod serienstream;
 
 use std::time::Duration;
@@ -55,9 +56,12 @@ pub trait Site: Send + Sync {
     async fn links(&self, episode: &EpisodeId) -> Result<Vec<HosterLink>>;
 }
 
-/// The HTTP client all sites share.
+/// The HTTP client all sites and hosters share. It only reaches the internet: names that
+/// point into a local network and redirects there are refused, see [`guard`].
 pub fn http_client() -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
+        .dns_resolver(guard::resolver())
+        .redirect(guard::redirects())
         // Both sites answer a browser user agent; others are not guaranteed.
         .user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0")
         .timeout(Duration::from_secs(30))

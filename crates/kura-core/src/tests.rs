@@ -1151,3 +1151,71 @@ async fn deleted_files_are_no_longer_downloaded() {
     // Auto-Sync does not download a deleted episode again.
     assert_eq!(s.core.sync_once().await.unwrap(), 0);
 }
+
+/// One user's request could hold hundreds of thousands of seasons: megabytes in the
+/// database and, once accepted, a page fetched from the site for every one of them.
+#[tokio::test]
+async fn requests_and_selections_have_limits() {
+    let s = setup(vec![link(Language::GermanDub, "voe", "https://x/ok")], 1);
+    let sam = s.core.store.create_user("sam", "hash", Role::User);
+    let sam = sam.unwrap().unwrap();
+    let picked = |seasons: Vec<u32>, episodes: Vec<(u32, u32)>| kura_domain::Picked {
+        all: false,
+        seasons,
+        episodes,
+    };
+    let ask = |picked: kura_domain::Picked| {
+        let core = s.core.clone();
+        async move {
+            let choices = Choices::default();
+            core.request(SiteId::AniWorld, "lantern-road", &picked, &choices, sam.id)
+                .await
+        }
+    };
+    let too_many = |result: Result<i64>| matches!(result, Err(CoreError::Invalid(_)));
+
+    assert!(too_many(ask(picked((1..=201).collect(), Vec::new())).await));
+    let episodes = (1..=5001).map(|number| (1, number)).collect();
+    assert!(too_many(ask(picked(Vec::new(), episodes)).await));
+    assert!(too_many(ask(picked(vec![1001], Vec::new())).await));
+    assert!(too_many(ask(picked(Vec::new(), vec![(1, 100_001)])).await));
+    // Repeats count once and are stored once.
+    let id = ask(picked(vec![1; 10_000], vec![(1, 2); 10_000]))
+        .await
+        .unwrap();
+    let stored = s.core.requests(Some(sam.id)).unwrap();
+    let stored = stored.iter().find(|request| request.id == id).unwrap();
+    assert_eq!(
+        (stored.picked.seasons.len(), stored.picked.episodes.len()),
+        (1, 1)
+    );
+
+    // A user can only have so many requests waiting.
+    for _ in 1..requests::MOST_OPEN_REQUESTS {
+        ask(picked(vec![1], Vec::new())).await.unwrap();
+    }
+    assert!(too_many(ask(picked(vec![1], Vec::new())).await));
+    s.core.reject_request(id).unwrap();
+    ask(picked(vec![1], Vec::new())).await.unwrap();
+
+    // A request stored before the limits existed is refused when accepted, and stays open.
+    let old = s.core.store.create_request(&kura_store::NewRequest {
+        user_id: sam.id,
+        site: SiteId::AniWorld,
+        slug: "lantern-road",
+        series_title: "Lantern Road",
+        picked: &picked((1..=250_000).collect(), Vec::new()),
+        language: None,
+        hoster: None,
+        imdb_id: None,
+        now: 0,
+    });
+    let old = old.unwrap();
+    assert!(too_many(
+        s.core.accept_request(old, s.user).await.map(|n| n as i64)
+    ));
+    assert!(s.core.jobs().unwrap().is_empty());
+    let open = s.core.requests(None).unwrap();
+    let open = open.iter().find(|request| request.id == old).unwrap();
+    assert_eq!(open.state, kura_domain::RequestState::Open);
+}

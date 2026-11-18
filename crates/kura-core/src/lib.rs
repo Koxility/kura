@@ -137,6 +137,10 @@ impl Download for Ffmpeg {
         format: OutputFormat,
         on_progress: &mut (dyn FnMut(Progress) + Send),
     ) -> std::result::Result<(), DownloadError> {
+        // The stream address comes from a hoster page; ffmpeg would fetch anything it names.
+        if let Err(blocked) = kura_sites::guard::check_stream(&stream.url).await {
+            return Err(DownloadError::BadUrl(blocked.to_string()));
+        }
         kura_download::download(stream, target, format, on_progress).await
     }
 }
@@ -180,6 +184,18 @@ const TRIES: u32 = 3;
 
 /// The wait before the second try; the third waits twice as long. None in tests.
 const RETRY_PAUSE: Duration = Duration::from_secs(if cfg!(test) { 0 } else { 5 });
+
+/// Most seasons one selection may name. Every season is a page fetched from the site, so a
+/// selection with thousands of them would keep the site busy for hours. Long series have a few
+/// dozen seasons; the whole series is picked with `all` instead.
+pub const MOST_SEASONS: usize = 200;
+
+/// Most single episodes one selection may name. More than the longest series has.
+pub const MOST_EPISODES: usize = 5000;
+
+/// Highest season and episode number a selection may name.
+const HIGHEST_SEASON: u32 = 1000;
+const HIGHEST_EPISODE: u32 = 100_000;
 
 /// The full lists are megabytes of HTML, so one fetch serves an hour of random picks.
 const CATALOG_TTL: Duration = Duration::from_secs(60 * 60);
@@ -417,7 +433,8 @@ impl Core {
             .unwrap_or("none");
         let (seasons, mut episodes) = match selection {
             Selection::Series => (series.seasons.clone(), Vec::new()),
-            Selection::Picked { seasons, episodes } => (seasons, episodes),
+            // Also a request stored before the limits existed is checked when it is accepted.
+            Selection::Picked { seasons, episodes } => check_picked(seasons, episodes)?,
         };
         for season in seasons {
             let listed = source.episodes(slug, season).await?;
@@ -684,6 +701,40 @@ impl Core {
             bytes: progress.bytes,
         });
     }
+}
+
+/// Single `(season, episode)` pairs.
+type Episodes = Vec<(u32, u32)>;
+
+/// A selection without repeats, refused when it names more than a series can have: each
+/// season is a page fetched from the site, and each episode a row in the queue.
+pub(crate) fn check_picked(
+    mut seasons: Vec<u32>,
+    mut episodes: Vec<(u32, u32)>,
+) -> Result<(Vec<u32>, Episodes)> {
+    seasons.sort_unstable();
+    seasons.dedup();
+    episodes.sort_unstable();
+    episodes.dedup();
+    if seasons.len() > MOST_SEASONS {
+        return Err(CoreError::Invalid(
+            "too many seasons at once; pick the whole series instead",
+        ));
+    }
+    if episodes.len() > MOST_EPISODES {
+        return Err(CoreError::Invalid(
+            "too many episodes at once; pick whole seasons instead",
+        ));
+    }
+    let season_ok = |season: &u32| *season <= HIGHEST_SEASON;
+    let episode_ok =
+        |(season, number): &(u32, u32)| season_ok(season) && *number <= HIGHEST_EPISODE;
+    if !seasons.iter().all(season_ok) || !episodes.iter().all(episode_ok) {
+        return Err(CoreError::Invalid(
+            "no series has a season or episode this high",
+        ));
+    }
+    Ok((seasons, episodes))
 }
 
 /// The folder a download goes to: the picked library, else the site's default library, else

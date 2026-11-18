@@ -11,10 +11,15 @@ struct Server {
 
 impl Server {
     async fn start() -> Self {
+        Self::behind(TrustedProxies::default()).await
+    }
+
+    /// A server that believes `X-Forwarded-For` from `proxies`.
+    async fn behind(proxies: TrustedProxies) -> Self {
         let core = Core::with_defaults(Store::open_in_memory().unwrap()).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
-        tokio::spawn(serve(listener, core));
+        tokio::spawn(serve(listener, core, proxies));
         Self {
             http: Client::new(),
             base,
@@ -327,9 +332,12 @@ async fn wrong_logins_are_slowed_down() {
     let server = Server::start().await;
     let admin = server.log_in("/setup", "admin", "correct horse").await;
     let wrong = json!({ "name": "admin", "password": "wrong horse" });
-    for _ in 0..5 {
-        let refused = server.call(Method::POST, "/login", "", wrong.clone());
-        assert_eq!(refused.await.0, 401);
+    for try_ in 0..5 {
+        // Without a trusted proxy, an address in the header is made up and changes nothing.
+        let from = format!("203.0.113.{try_}");
+        let refused = server.request(Method::POST, "/login", "");
+        let refused = refused.header("X-Forwarded-For", from).json(&wrong);
+        assert_eq!(refused.send().await.unwrap().status(), 401);
     }
     // From here on the right password has to wait too.
     let right = json!({ "name": "admin", "password": "correct horse" });
@@ -381,4 +389,37 @@ fn users_see_jobs_without_server_paths() {
              <library>/Frieren/Season 01/x.mkv.part; vidmoly: <library>/Frieren is full"
         )
     );
+}
+
+/// HAProxy in front of Kura: every connection is the proxy's, the header names the person.
+#[tokio::test]
+async fn behind_a_trusted_proxy_the_brake_counts_the_person() {
+    let server = Server::behind(TrustedProxies::parse("127.0.0.1").unwrap()).await;
+    server.log_in("/setup", "admin", "correct horse").await;
+    let login = async |from: &str, password: &str, proto: &str| {
+        let form = json!({ "name": "admin", "password": password });
+        let request = server.request(Method::POST, "/login", "");
+        let request = request.header("X-Forwarded-For", from);
+        let response = request.header("X-Forwarded-Proto", proto).json(&form);
+        response.send().await.unwrap()
+    };
+    for _ in 0..6 {
+        let attacker = login("203.0.113.66", "guess", "https").await;
+        assert!([401, 429].contains(&attacker.status().as_u16()));
+    }
+    assert_eq!(
+        login("203.0.113.66", "correct horse", "https")
+            .await
+            .status(),
+        429
+    );
+    // The admin, somewhere else, is not held up.
+    let admin = login("198.51.100.7", "correct horse", "https").await;
+    assert_eq!(admin.status(), 200);
+    let cookie = admin.headers()["set-cookie"].to_str().unwrap();
+    assert!(cookie.ends_with("; Secure"), "{cookie}");
+    // Over plain HTTP the cookie has to work without `Secure`.
+    let plain = login("198.51.100.7", "correct horse", "http").await;
+    let cookie = plain.headers()["set-cookie"].to_str().unwrap();
+    assert!(!cookie.contains("Secure"), "{cookie}");
 }

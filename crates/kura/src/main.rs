@@ -1,4 +1,5 @@
 mod api;
+mod proxy;
 
 use std::{env, net::SocketAddr, path::PathBuf, process::ExitCode, time::Duration};
 
@@ -21,6 +22,8 @@ Environment:
   KURA_DATA              Folder for the database (default data)
   KURA_LIBRARY_DIR       Folder the library setup suggests
   KURA_NAMING_TEMPLATE   File name template while the settings set none
+  KURA_TRUSTED_PROXIES   Reverse proxies whose X-Forwarded-For is believed, e.g.
+                         172.18.0.0/16 or 10.0.0.5,::1 (default: none)
 ";
 
 #[tokio::main]
@@ -66,6 +69,8 @@ async fn serve() -> anyhow::Result<()> {
     std::fs::create_dir_all(&data)
         .with_context(|| format!("could not create the data folder {}", data.display()))?;
     let store = Store::open(&data.join("kura.db")).context("could not open the database")?;
+    let proxies = proxy::TrustedProxies::from_env()
+        .map_err(|err| anyhow::anyhow!("KURA_TRUSTED_PROXIES: {err}"))?;
     let core = Core::with_defaults(store)?;
     // Asks GitHub for a newer release now, so the top bar can show it from the first page.
     core.newer_release();
@@ -79,12 +84,15 @@ async fn serve() -> anyhow::Result<()> {
         env!("CARGO_PKG_VERSION"),
         listener.local_addr()?
     );
+    if !proxies.is_empty() {
+        tracing::info!("believing X-Forwarded-For from {proxies}");
+    }
 
     // Without its download workers the server is of no use, so either one ending ends both.
     // Stopping drops the running downloads, which ends ffmpeg and removes partial files;
     // they start over on the next start.
     tokio::select! {
-        served = api::serve(listener, core.clone()) => served?,
+        served = api::serve(listener, core.clone(), proxies) => served?,
         worked = core.clone().run() => worked.context("the download workers stopped")?,
         synced = core.clone().run_auto_sync() => synced.context("Auto-Sync stopped")?,
         () = core.clone().run_library_scan() => {}
