@@ -7,8 +7,7 @@ use axum::{
     Extension, Json, Router,
     extract::{ConnectInfo, FromRequestParts, Path, Query, State},
     http::{
-        HeaderMap, StatusCode, Uri,
-        HeaderValue,
+        HeaderMap, HeaderValue, StatusCode, Uri,
         header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, ETAG, IF_NONE_MATCH, SET_COOKIE},
         request::Parts,
     },
@@ -613,9 +612,11 @@ async fn events(State(core): App, _: Session) -> impl IntoResponse {
     let events = BroadcastStream::new(core.subscribe()).map(|event| {
         // A listener that fell behind lost events; this makes it read the queue again.
         let event = event.unwrap_or(Event::QueueChanged);
-        Ok::<_, Infallible>(SseEvent::default()
-            .json_data(event)
-            .unwrap_or_else(|_| SseEvent::default().comment("unreadable event")))
+        Ok::<_, Infallible>(
+            SseEvent::default()
+                .json_data(event)
+                .unwrap_or_else(|_| SseEvent::default().comment("unreadable event")),
+        )
     });
     let stream = Sse::new(events).keep_alive(KeepAlive::default());
     // nginx and similar proxies hold back a response until a buffer fills, which delays

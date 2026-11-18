@@ -465,13 +465,25 @@ async fn answers_are_never_cached_and_events_are_not_buffered() {
     let server = Server::start().await;
     let admin = server.log_in("/setup", "admin", "correct horse").await;
 
-    let queue = server.request(Method::GET, "/queue", &admin).send().await.unwrap();
+    let queue = server
+        .request(Method::GET, "/queue", &admin)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(queue.headers()["cache-control"], "no-store");
-    let missing = server.request(Method::GET, "/nothing", &admin).send().await.unwrap();
+    let missing = server
+        .request(Method::GET, "/nothing", &admin)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(missing.headers()["cache-control"], "no-store");
 
     let events = server.request(Method::GET, "/events", &admin);
-    let events = events.header("Accept-Encoding", "gzip, br").send().await.unwrap();
+    let events = events
+        .header("Accept-Encoding", "gzip, br")
+        .send()
+        .await
+        .unwrap();
     assert_eq!(events.headers()["content-type"], "text/event-stream");
     assert_eq!(events.headers()["x-accel-buffering"], "no");
     assert_eq!(events.headers()["cache-control"], "no-cache, no-transform");
@@ -482,7 +494,12 @@ async fn answers_are_never_cached_and_events_are_not_buffered() {
 #[tokio::test]
 async fn the_web_app_is_cached_by_content_and_compressed() {
     let server = Server::start().await;
-    let page = server.http.get(format!("{}/queue", server.base)).send().await.unwrap();
+    let page = server
+        .http
+        .get(format!("{}/queue", server.base))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(page.status(), 200);
     assert_eq!(page.headers()["cache-control"], "no-cache");
     let tag = page.headers()["etag"].to_str().unwrap().to_owned();
@@ -499,7 +516,11 @@ async fn the_web_app_is_cached_by_content_and_compressed() {
         .find(|part| part.starts_with("/assets/") && part.ends_with(".js"))
         .expect("the page loads a script from /assets/");
     let script = server.http.get(format!("{}{script}", server.base));
-    let script = script.header("Accept-Encoding", "gzip").send().await.unwrap();
+    let script = script
+        .header("Accept-Encoding", "gzip")
+        .send()
+        .await
+        .unwrap();
     assert_eq!(script.status(), 200);
     assert_eq!(
         script.headers()["cache-control"],

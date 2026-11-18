@@ -21,8 +21,7 @@ use async_trait::async_trait;
 pub use auth::SESSION_TTL;
 use kura_domain::{
     Episode, EpisodeId, Genre, HosterLink, Job, JobState, Language, Library, OutputFormat,
-    RemovedTitle,
-    Schedule, Series, SeriesSummary, Settings, SiteId, Stream, TitleRef,
+    RemovedTitle, Schedule, Series, SeriesSummary, Settings, SiteId, Stream, TitleRef,
 };
 use kura_download::{DownloadError, Progress};
 use kura_hosters::Hoster;
