@@ -4,6 +4,10 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.2.7] - 2026-11-18
+
+**Running Kura behind a reverse proxy (HAProxy, Caddy, Traefik, nginx)?** Updating alone does not fix the login lockout below. Set `KURA_TRUSTED_PROXIES` to the proxy's address and have the proxy send `X-Forwarded-For`; see [Behind a reverse proxy](https://github.com/Koxility/kura/blob/master/docs/wiki/Docker-Compose.md#behind-a-reverse-proxy).
+
 ### Security
 
 - Behind a reverse proxy like HAProxy, wrong logins from one person no longer lock everyone else out. Kura saw every login as coming from the proxy, so five wrong passwords for `admin` from anywhere on the internet held up the real admin's logins for up to 15 minutes, again and again. The new setting `KURA_TRUSTED_PROXIES` names the proxy; Kura then counts by the address in `X-Forwarded-For`. The header is ignored from anyone else, so it cannot be made up.
@@ -162,7 +166,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.6...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.7...HEAD
+[1.2.7]: https://github.com/Koxility/kura/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/Koxility/kura/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/Koxility/kura/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/Koxility/kura/compare/v1.2.3...v1.2.4
