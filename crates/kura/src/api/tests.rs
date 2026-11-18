@@ -423,3 +423,87 @@ async fn behind_a_trusted_proxy_the_brake_counts_the_person() {
     let cookie = plain.headers()["set-cookie"].to_str().unwrap();
     assert!(!cookie.contains("Secure"), "{cookie}");
 }
+
+#[tokio::test]
+async fn status_names_the_real_defaults() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let (_, mut settings) = server.get("/settings", &admin).await;
+    let folder = tempfile::tempdir().unwrap();
+    settings["libraries"] = json!([
+        { "name": "Main", "path": folder.path().join("main") },
+        { "name": "Anime", "path": folder.path().join("anime"), "default_for": ["aniworld"] },
+    ]);
+    settings["languages"] = json!(["german_sub", "german_dub"]);
+    settings["hosters"] = json!(["made-up", "vidmoly", "voe"]);
+    let saved = server.call(Method::PUT, "/settings", &admin, settings);
+    assert_eq!(saved.await.0, 200);
+
+    let (_, status) = server.get("/status", &admin).await;
+    assert_eq!(
+        status["defaults"],
+        json!({
+            "language": "german_sub",
+            // A provider Kura cannot extract from is never the one that is used.
+            "hoster": "vidmoly",
+            "libraries": { "aniworld": "Anime", "serienstream": "Main" },
+        })
+    );
+
+    let sam = json!({ "name": "sam", "password": "battery staple", "role": "user" });
+    server.call(Method::POST, "/users", &admin, sam).await;
+    let user = server.log_in("/login", "sam", "battery staple").await;
+    let (_, status) = server.get("/status", &user).await;
+    // Library names are for admins.
+    assert_eq!(status["defaults"]["libraries"], json!({}));
+    assert_eq!(status["defaults"]["language"], "german_sub");
+    assert_eq!(server.get("/status", "").await.1["defaults"], Value::Null);
+}
+
+#[tokio::test]
+async fn answers_are_never_cached_and_events_are_not_buffered() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+
+    let queue = server.request(Method::GET, "/queue", &admin).send().await.unwrap();
+    assert_eq!(queue.headers()["cache-control"], "no-store");
+    let missing = server.request(Method::GET, "/nothing", &admin).send().await.unwrap();
+    assert_eq!(missing.headers()["cache-control"], "no-store");
+
+    let events = server.request(Method::GET, "/events", &admin);
+    let events = events.header("Accept-Encoding", "gzip, br").send().await.unwrap();
+    assert_eq!(events.headers()["content-type"], "text/event-stream");
+    assert_eq!(events.headers()["x-accel-buffering"], "no");
+    assert_eq!(events.headers()["cache-control"], "no-cache, no-transform");
+    // A compressed stream would sit in the compressor until enough piles up.
+    assert!(events.headers().get("content-encoding").is_none());
+}
+
+#[tokio::test]
+async fn the_web_app_is_cached_by_content_and_compressed() {
+    let server = Server::start().await;
+    let page = server.http.get(format!("{}/queue", server.base)).send().await.unwrap();
+    assert_eq!(page.status(), 200);
+    assert_eq!(page.headers()["cache-control"], "no-cache");
+    let tag = page.headers()["etag"].to_str().unwrap().to_owned();
+    let html = page.text().await.unwrap();
+
+    let again = server.http.get(format!("{}/", server.base));
+    let again = again.header("If-None-Match", &tag).send().await.unwrap();
+    assert_eq!(again.status(), 304);
+    assert_eq!(again.headers()["etag"], tag.as_str());
+
+    // Vite names its files after their content.
+    let script = html
+        .split('"')
+        .find(|part| part.starts_with("/assets/") && part.ends_with(".js"))
+        .expect("the page loads a script from /assets/");
+    let script = server.http.get(format!("{}{script}", server.base));
+    let script = script.header("Accept-Encoding", "gzip").send().await.unwrap();
+    assert_eq!(script.status(), 200);
+    assert_eq!(
+        script.headers()["cache-control"],
+        "public, max-age=31536000, immutable"
+    );
+    assert_eq!(script.headers()["content-encoding"], "gzip");
+}

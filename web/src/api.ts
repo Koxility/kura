@@ -106,6 +106,17 @@ export interface Status {
   sites: Site[];
   /** Library names, for admins only. */
   libraries: string[];
+  /** What a download uses when nothing is picked; absent while logged out. */
+  defaults: Defaults | null;
+}
+
+export interface Defaults {
+  /** The first language of the settings; later ones are tried when it has no link. */
+  language: Language | null;
+  /** The first provider of the settings that Kura supports. */
+  hoster: string | null;
+  /** Each enabled site's library, for admins only. */
+  libraries: Partial<Record<Site, string>>;
 }
 
 export type RequestState = "open" | "accepted" | "rejected";
@@ -182,15 +193,17 @@ export const jobsQuery = {
   queryKey: ["queue"],
   queryFn: () => api<Job[]>("/queue"),
   // Live events keep the queue current; this catches what they miss while something is
-  // downloading or waiting.
+  // downloading or waiting, e.g. behind a proxy that holds events back.
   refetchInterval: (query: { state: { data?: Job[] } }) =>
     query.state.data?.some((job) => job.state === "queued" || job.state === "running")
-      ? 15_000
+      ? 5_000
       : false,
 };
 export const statusQuery = {
   queryKey: ["status"],
   queryFn: () => api<Status>("/status"),
+  // Every page reads it; fetched again when the settings change, not on every page.
+  staleTime: 5 * 60_000,
   // Also picks up a new release while the page stays open.
   refetchInterval: 30 * 60_000,
 };
@@ -230,9 +243,17 @@ export const languageNames: Record<Language, string> = {
 };
 export const languages = Object.keys(languageNames) as Language[];
 
-/** A picked language, or what applies when none was picked. */
-export const languageLabel = (language: Language | null) =>
-  language ? languageNames[language] : "Language from the settings";
+/** A picked language, or the default that applies when none was picked. */
+export const languageLabel = (language: Language | null, defaults?: Defaults | null) => {
+  const shown = language ?? defaults?.language;
+  return shown ? languageNames[shown] : "Default language";
+};
+
+/** A picked provider, or the default that applies when none was picked. */
+export const hosterLabel = (hoster: string | null, defaults?: Defaults | null) => {
+  const shown = hoster ?? defaults?.hoster;
+  return shown ? (hosterNames[shown] ?? shown) : "Default provider";
+};
 
 // shortcut: mirrors the hosters the server can extract from; serve the list from the API
 // once hosters change more often than this file.

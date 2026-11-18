@@ -97,6 +97,8 @@ function SettingsForm({
     onSuccess: (saved) => {
       client.setQueryData(settingsQuery.queryKey, saved);
       setDraft(saved);
+      // The status names the default language, provider and libraries.
+      client.invalidateQueries({ queryKey: ["status"] });
     },
   });
 
@@ -224,7 +226,7 @@ function Downloads({ draft, change }: SectionProps) {
       />
       <Order
         label="Language order"
-        hint="Used when a download leaves the language on Automatic, and by Auto-Sync."
+        hint="The first is the default for downloads and requests; the others are tried when it has no link. Auto-Sync uses the same order."
         all={languages}
         value={draft.languages}
         name={(language) => languageNames[language as Language]}

@@ -4,10 +4,12 @@ import {
   api,
   episodeCode,
   formatBytes,
+  type Defaults,
   type Job,
   type JobState,
   jobsQuery,
   languageLabel,
+  statusQuery,
 } from "../api";
 import ui from "../ui.module.css";
 import styles from "./Queue.module.css";
@@ -79,6 +81,7 @@ function group(jobs: Job[]): Group[] {
 export function Queue({ admin }: { admin: boolean }) {
   const client = useQueryClient();
   const jobs = useQuery(jobsQuery);
+  const defaults = useQuery(statusQuery).data?.defaults;
   const [filter, setFilter] = useState<"all" | GroupState>("all");
   const [sort, setSort] = useState<Sort>("queue");
   const [term, setTerm] = useState("");
@@ -179,6 +182,7 @@ export function Queue({ admin }: { admin: boolean }) {
             onToggle={() => toggle(group.key)}
             busy={act.isPending}
             admin={admin}
+            defaults={defaults}
             act={(paths) => act.mutate(paths)}
           />
         ))}
@@ -193,6 +197,7 @@ function GroupRow({
   onToggle,
   busy,
   admin,
+  defaults,
   act,
 }: {
   group: Group;
@@ -200,6 +205,7 @@ function GroupRow({
   onToggle: () => void;
   busy: boolean;
   admin: boolean;
+  defaults?: Defaults | null;
   act: (paths: string[]) => void;
 }) {
   const { jobs } = group;
@@ -215,8 +221,9 @@ function GroupRow({
 
   const named = running.slice(0, NAMED).map(code).join(", ");
   const more = running.length > NAMED ? ` +${running.length - NAMED} more` : "";
-  // A finished job holds the language it was downloaded in, a waiting one the picked one.
-  const languages = [...new Set(jobs.map((job) => languageLabel(job.language)))];
+  // A finished job holds the language it was downloaded in, a waiting one the picked one or
+  // else the default.
+  const languages = [...new Set(jobs.map((job) => languageLabel(job.language, defaults)))];
   const status = [
     languages.join(", "),
     running.length > 0 &&
@@ -288,7 +295,7 @@ function GroupRow({
           {jobs.map((job) => (
             <li key={job.id} className={ui.row}>
               <span className={`${ui.mono} ${ui.muted}`}>{code(job)}</span>
-              <span className={ui.muted}>{languageLabel(job.language)}</span>
+              <span className={ui.muted}>{languageLabel(job.language, defaults)}</span>
               <div className={`${ui.grow} ${styles.message}`}>
                 {job.state === "failed" && job.error && <p className={ui.error}>{job.error}</p>}
               </div>

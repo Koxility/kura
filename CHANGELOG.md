@@ -4,6 +4,23 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.2.8] - 2026-11-18
+
+### Fixed
+
+- Switching pages always shows the current state. Pages kept what they had read for 30 seconds, so the queue, requests and settings could show an old state until the browser reloaded. Kura's own data is now read again whenever a page shows it, and again when the browser tab comes back to the front; the last known state shows meanwhile. Accepting, rejecting, cancelling and clearing requests also show their result at once.
+- The queue shows at once when a download finishes and the next one starts. Behind nginx and similar reverse proxies, the live updates sat in the proxy's buffer for minutes; Kura now asks proxies not to hold them back (`X-Accel-Buffering: no`). Progress for a download the page did not know had started makes it read the queue again, and while something downloads the queue is also read every 5 seconds instead of 15, in case an update is lost on the way.
+- Several open Kura tabs no longer stall each other. Each tab kept a live connection open, and over plain HTTP a browser allows only six per server, so with a few tabs pages loaded slowly or not at all until one was closed. Only the tab in front keeps the connection now; a tab coming back reconnects and reads everything again.
+
+### Changed
+
+- The language, provider and library choices on a title's page show the real default first instead of "Automatic" and "Default", e.g. "German dub", "VOE" and the site's library. Leaving the default still tries the next languages and providers from the settings when it has no link.
+- The queue and requests show the default language and provider instead of "Language from the settings" when none was picked.
+
+### Performance
+
+- The web app is sent compressed (Brotli or gzip), and its scripts, styles and fonts are kept by the browser for good, since their names change with every build. The page itself is checked with an `ETag` and answered with "not modified" when it has not changed. API answers are marked `no-store`, so no browser or proxy serves an old one.
+
 ## [1.2.7] - 2026-11-18
 
 **Running Kura behind a reverse proxy (HAProxy, Caddy, Traefik, nginx)?** Updating alone does not fix the login lockout below. Set `KURA_TRUSTED_PROXIES` to the proxy's address and have the proxy send `X-Forwarded-For`; see [Behind a reverse proxy](https://github.com/Koxility/kura/blob/master/docs/wiki/Docker-Compose.md#behind-a-reverse-proxy).
@@ -166,7 +183,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.7...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.8...HEAD
+[1.2.8]: https://github.com/Koxility/kura/compare/v1.2.7...v1.2.8
 [1.2.7]: https://github.com/Koxility/kura/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/Koxility/kura/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/Koxility/kura/compare/v1.2.4...v1.2.5

@@ -11,7 +11,9 @@ import { ApiError } from "./api";
 import { App } from "./App";
 
 const client: QueryClient = new QueryClient({
-  defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
+  // Kura's own data is read again whenever a page shows it, so switching pages never shows
+  // an old state; the cached one shows meanwhile. Lists from the sites set a longer time.
+  defaultOptions: { queries: { retry: false, staleTime: 0, refetchOnWindowFocus: true } },
   queryCache: new QueryCache({
     // The session ended: asking for the status again brings up the login page.
     onError: (error, query) => {

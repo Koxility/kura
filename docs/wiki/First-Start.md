@@ -20,7 +20,7 @@ Kura creates the folder if it does not exist. This first library is the *main li
 
 1. On **Home**, pick a site, search for a title or browse genres, and open it.
 2. Open a season, tick episodes, or tick *Whole season* on the right of a season row.
-3. Optionally choose language and provider at the bottom; *Automatic* follows your settings.
+3. Optionally choose language and provider at the bottom; the first choice is the default from your settings.
 4. Press **Download Selected** or **Download All**.
 
 If the site has no IMDb ID for the title, Kura asks for one first; see [[Folder Structure|Folder-Structure]].

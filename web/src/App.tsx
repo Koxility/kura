@@ -165,30 +165,51 @@ function useLiveQueue() {
   const client = useQueryClient();
   useEffect(() => {
     const seen = new Map<number, { bytes: number; at: number }>();
-    let source: EventSource;
+    let source: EventSource | undefined;
     let reconnect: number | undefined;
+    const refresh = () => {
+      client.invalidateQueries({ queryKey: ["queue"] });
+      client.invalidateQueries({ queryKey: ["requests"] });
+      // A finished download changes what shows as downloaded.
+      client.invalidateQueries({ queryKey: ["downloaded"] });
+    };
     const connect = () => {
+      window.clearTimeout(reconnect);
+      source?.close();
       source = new EventSource("/api/v1/events");
-      // Events sent while the stream was down are lost, e.g. while a phone slept, so every
-      // new connection reads the queue again.
+      // Events sent while the stream was down are lost, e.g. while a phone slept or the tab
+      // was in the background, so every new connection reads everything live again.
       source.onopen = () => {
         seen.clear();
-        client.invalidateQueries({ queryKey: ["queue"] });
+        refresh();
       };
       // The browser reconnects by itself after a dropped connection, but gives up for good
       // when the server answers with an error, e.g. a proxy while Kura restarts.
       source.onerror = () => {
-        if (source.readyState !== EventSource.CLOSED) return;
+        if (source?.readyState !== EventSource.CLOSED) return;
         window.clearTimeout(reconnect);
         reconnect = window.setTimeout(connect, 5000);
       };
       source.onmessage = onMessage;
     };
+    const disconnect = () => {
+      window.clearTimeout(reconnect);
+      source?.close();
+      source = undefined;
+    };
+    // A browser keeps only six connections to a server over plain HTTP. A stream held open by
+    // every background tab leaves none for loading pages, so only a visible tab listens.
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        if (!source) connect();
+      } else {
+        disconnect();
+      }
+    };
     const onMessage = (message: MessageEvent<string>) => {
       const event = JSON.parse(message.data) as LiveEvent;
       if (event.type === "queue_changed") {
         client.invalidateQueries({ queryKey: ["queue"] });
-        // A finished download changes what shows as downloaded.
         client.invalidateQueries({ queryKey: ["downloaded"] });
         return;
       }
@@ -201,6 +222,13 @@ function useLiveQueue() {
       seen.set(event.id, { bytes: event.bytes, at: now });
       const speed =
         last && now > last.at ? ((event.bytes - last.bytes) * 1000) / (now - last.at) : undefined;
+      const jobs = client.getQueryData<Job[]>(["queue"]);
+      const job = jobs?.find((job) => job.id === event.id);
+      // Progress for a download the page does not show as running means a change was missed.
+      if (jobs && job?.state !== "running") {
+        client.invalidateQueries({ queryKey: ["queue"] });
+        return;
+      }
       client.setQueryData<Job[]>(["queue"], (jobs) =>
         jobs?.map((job) =>
           job.id === event.id
@@ -209,10 +237,11 @@ function useLiveQueue() {
         ),
       );
     };
-    connect();
+    if (document.visibilityState === "visible") connect();
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      window.clearTimeout(reconnect);
-      source.close();
+      document.removeEventListener("visibilitychange", onVisibility);
+      disconnect();
     };
   }, [client]);
 }

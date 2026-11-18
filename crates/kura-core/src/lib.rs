@@ -20,7 +20,8 @@ use std::{
 use async_trait::async_trait;
 pub use auth::SESSION_TTL;
 use kura_domain::{
-    Episode, EpisodeId, Genre, HosterLink, Job, JobState, Language, OutputFormat, RemovedTitle,
+    Episode, EpisodeId, Genre, HosterLink, Job, JobState, Language, Library, OutputFormat,
+    RemovedTitle,
     Schedule, Series, SeriesSummary, Settings, SiteId, Stream, TitleRef,
 };
 use kura_download::{DownloadError, Progress};
@@ -75,6 +76,17 @@ pub enum Event {
     QueueChanged,
     RequestsChanged,
     Progress { id: i64, fraction: f64, bytes: u64 },
+}
+
+/// What a download uses when nothing is picked for it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Defaults {
+    /// The first of the settings' languages; later ones are tried when it has no link.
+    pub language: Option<Language>,
+    /// The first provider of the settings that Kura can extract from.
+    pub hoster: Option<String>,
+    /// The library name each enabled site downloads into.
+    pub libraries: HashMap<SiteId, String>,
 }
 
 /// Which episodes of a series to queue.
@@ -363,6 +375,23 @@ impl Core {
 
     pub fn settings(&self) -> Result<Settings> {
         Ok(self.store.settings()?)
+    }
+
+    /// What a download uses when nothing is picked: the first language and the first
+    /// supported provider of the settings, and each enabled site's library.
+    pub fn defaults(&self) -> Result<Defaults> {
+        let settings = self.store.settings()?;
+        let supported = |name: &&String| self.hosters.iter().any(|hoster| hoster.name() == *name);
+        let libraries = self
+            .enabled_sites()?
+            .into_iter()
+            .filter_map(|site| Some((site, default_library(&settings, site)?.name.clone())))
+            .collect();
+        Ok(Defaults {
+            language: settings.languages.first().copied(),
+            hoster: settings.hosters.iter().find(supported).cloned(),
+            libraries,
+        })
     }
 
     pub fn save_settings(&self, settings: &Settings) -> Result<()> {
@@ -746,17 +775,20 @@ fn library_dir(settings: &Settings, site: SiteId, picked: Option<&str>) -> Resul
             let library = libraries.iter().find(|library| library.name == name);
             library.ok_or(CoreError::Invalid("no such library"))?
         }
-        None => {
-            let default = libraries
-                .iter()
-                .find(|library| library.default_for.contains(&site));
-            let main = default.or(libraries.first());
-            main.ok_or(CoreError::Invalid(
-                "an admin needs to set up a library first",
-            ))?
-        }
+        None => default_library(settings, site).ok_or(CoreError::Invalid(
+            "an admin needs to set up a library first",
+        ))?,
     };
     Ok(library.path.to_string_lossy().into_owned())
+}
+
+/// The site's default library, else the main library.
+fn default_library(settings: &Settings, site: SiteId) -> Option<&Library> {
+    let libraries = &settings.libraries;
+    let default = libraries
+        .iter()
+        .find(|library| library.default_for.contains(&site));
+    default.or(libraries.first())
 }
 
 /// Refuses settings that would leave Kura unable to download or sync.

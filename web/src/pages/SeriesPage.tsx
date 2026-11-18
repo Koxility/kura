@@ -30,7 +30,12 @@ export function SeriesPage() {
   const status = useQuery(statusQuery);
   const admin = status.data?.user?.role === "admin";
   const base = `/series/${site}/${slug}`;
-  const series = useQuery({ queryKey: ["series", site, slug], queryFn: () => api<Series>(base) });
+  // Read from the site, which is slow and rarely changes.
+  const series = useQuery({
+    queryKey: ["series", site, slug],
+    queryFn: () => api<Series>(base),
+    staleTime: 10 * 60_000,
+  });
   // Only admins may read the settings; users have no Auto-Sync to exclude from.
   const settings = useQuery({ ...settingsQuery, enabled: admin });
   // What is already in a library, by database and by folders on disk.
@@ -47,7 +52,8 @@ export function SeriesPage() {
   });
   const have = new Set((downloaded.data ?? []).map(([season, number]) => `${season}:${number}`));
 
-  // An empty choice leaves it to the settings.
+  // An empty choice is the default from the settings, which also tries the other languages
+  // and providers in their order when the first has no link.
   const [language, setLanguage] = useState("");
   const [hoster, setHoster] = useState("");
   const [library, setLibrary] = useState("");
@@ -71,7 +77,7 @@ export function SeriesPage() {
     onSuccess: () => {
       setWholeSeasons([]);
       setSingle([]);
-      if (!admin) client.invalidateQueries({ queryKey: ["requests"] });
+      client.invalidateQueries({ queryKey: [admin ? "queue" : "requests"] });
     },
   });
   const exclude = useMutation({
@@ -90,6 +96,10 @@ export function SeriesPage() {
   }
   const { summary, description, seasons, imdb_id } = series.data;
   const libraries = status.data?.libraries ?? [];
+  const defaults = status.data?.defaults;
+  const defaultLanguage = defaults?.language ?? undefined;
+  const defaultHoster = defaults?.hoster ?? undefined;
+  const defaultLibrary = defaults?.libraries[summary.site];
   const excluded =
     settings.data?.auto_sync.excluded.some((title) => title.site === site && title.slug === slug) ??
     false;
@@ -169,35 +179,42 @@ export function SeriesPage() {
         <label className={ui.field}>
           Language
           <select className={ui.input} value={language} onChange={(event) => setLanguage(event.target.value)}>
-            <option value="">Automatic</option>
-            {languages.map((option) => (
-              <option key={option} value={option}>
-                {languageNames[option]}
-              </option>
-            ))}
+            {/* The default comes first and keeps the fallback to the next languages. */}
+            <option value="">{defaultLanguage ? languageNames[defaultLanguage] : "Default"}</option>
+            {languages
+              .filter((option) => option !== defaultLanguage)
+              .map((option) => (
+                <option key={option} value={option}>
+                  {languageNames[option]}
+                </option>
+              ))}
           </select>
         </label>
         <label className={ui.field}>
           Provider
           <select className={ui.input} value={hoster} onChange={(event) => setHoster(event.target.value)}>
-            <option value="">Automatic</option>
-            {supportedHosters.map((option) => (
-              <option key={option} value={option}>
-                {hosterNames[option] ?? option}
-              </option>
-            ))}
+            <option value="">{defaultHoster ? (hosterNames[defaultHoster] ?? defaultHoster) : "Default"}</option>
+            {supportedHosters
+              .filter((option) => option !== defaultHoster)
+              .map((option) => (
+                <option key={option} value={option}>
+                  {hosterNames[option] ?? option}
+                </option>
+              ))}
           </select>
         </label>
         {admin && libraries.length > 1 && (
           <label className={ui.field}>
             Library
             <select className={ui.input} value={library} onChange={(event) => setLibrary(event.target.value)}>
-              <option value="">Default</option>
-              {libraries.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
+              <option value="">{defaultLibrary ?? "Default"}</option>
+              {libraries
+                .filter((name) => name !== defaultLibrary)
+                .map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
             </select>
           </label>
         )}

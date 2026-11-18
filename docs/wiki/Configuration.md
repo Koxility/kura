@@ -57,7 +57,7 @@ The folders above the file are fixed; see [[Folder Structure|Folder-Structure]].
 
 ### Provider fallback order and language order
 
-When a download leaves language or provider on *Automatic*, Kura tries the languages from top to bottom, and within a language the providers from top to bottom, until one works. Supported providers: VOE and Vidmoly. Auto-Sync always follows these orders.
+When a download keeps the default language and provider (the first choice on a title's page), Kura tries the languages from top to bottom, and within a language the providers from top to bottom, until one works. Supported providers: VOE and Vidmoly. Auto-Sync always follows these orders.
 
 ## Settings → Library
 

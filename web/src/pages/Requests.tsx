@@ -1,15 +1,17 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import {
   api,
   describePicked,
   formatTime,
-  hosterNames,
+  type Defaults,
+  hosterLabel,
   languageLabel,
   type Request,
   type RequestState,
   requestsQuery,
   siteNames,
+  statusQuery,
 } from "../api";
 import ui from "../ui.module.css";
 
@@ -26,12 +28,20 @@ const stateStyles: Record<RequestState, string> = {
 
 /** Admins decide on every request; users follow their own. */
 export function Requests({ admin }: { admin: boolean }) {
+  const client = useQueryClient();
   const requests = useQuery(requestsQuery);
+  const defaults = useQuery(statusQuery).data?.defaults;
+  // Shows the result also when the live event for it was missed.
+  const refresh = () => {
+    client.invalidateQueries({ queryKey: ["requests"] });
+    client.invalidateQueries({ queryKey: ["queue"] });
+  };
   const decide = useMutation({
     mutationFn: ({ id, action }: { id: number; action: "accept" | "reject" | "cancel" }) =>
       api(`/requests/${id}/${action}`, "POST"),
+    onSettled: refresh,
   });
-  const clear = useMutation({ mutationFn: () => api("/requests/clear", "POST") });
+  const clear = useMutation({ mutationFn: () => api("/requests/clear", "POST"), onSettled: refresh });
   const list = requests.data ?? [];
   const open = list.filter((request) => request.state === "open");
   const decided = list.filter((request) => request.state !== "open");
@@ -58,7 +68,7 @@ export function Requests({ admin }: { admin: boolean }) {
           <h2 className={ui.section}>Open</h2>
           <ul className={ui.list}>
             {open.map((request) => (
-              <Row key={request.id} request={request} admin={admin}>
+              <Row key={request.id} request={request} admin={admin} defaults={defaults}>
                 {!admin && (
                   <button
                     type="button"
@@ -115,7 +125,7 @@ export function Requests({ admin }: { admin: boolean }) {
           )}
           <ul className={ui.list}>
             {decided.map((request) => (
-              <Row key={request.id} request={request} admin={admin} />
+              <Row key={request.id} request={request} admin={admin} defaults={defaults} />
             ))}
           </ul>
         </>
@@ -127,16 +137,19 @@ export function Requests({ admin }: { admin: boolean }) {
 function Row({
   request,
   admin,
+  defaults,
   children,
 }: {
   request: Request;
   admin: boolean;
+  defaults?: Defaults | null;
   children?: React.ReactNode;
 }) {
+  // Nothing picked shows the default that applies.
   const details = [
     describePicked(request.picked),
-    languageLabel(request.language),
-    request.hoster && (hosterNames[request.hoster] ?? request.hoster),
+    languageLabel(request.language, defaults),
+    hosterLabel(request.hoster, defaults),
     siteNames[request.site],
     admin && `by ${request.user_name}`,
     formatTime(request.created_at),

@@ -8,7 +8,8 @@ use axum::{
     extract::{ConnectInfo, FromRequestParts, Path, Query, State},
     http::{
         HeaderMap, StatusCode, Uri,
-        header::{CONTENT_TYPE, COOKIE, SET_COOKIE},
+        HeaderValue,
+        header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, ETAG, IF_NONE_MATCH, SET_COOKIE},
         request::Parts,
     },
     response::{
@@ -28,7 +29,8 @@ use kura_domain::{
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
+use tower_http::{compression::CompressionLayer, set_header::SetResponseHeaderLayer};
 
 use crate::proxy::TrustedProxies;
 
@@ -88,11 +90,18 @@ fn router(core: Arc<Core>) -> Router {
         .route("/admin/ip", get(public_ip))
         .route("/users", get(users).post(create_user))
         .route("/users/{id}", delete(delete_user))
-        .fallback(|| async { ApiError(StatusCode::NOT_FOUND, "no such endpoint".into()) });
+        .fallback(|| async { ApiError(StatusCode::NOT_FOUND, "no such endpoint".into()) })
+        // Answers change with every download; neither the browser nor a proxy may keep one.
+        .layer(SetResponseHeaderLayer::if_not_present(
+            CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        ));
     Router::new()
         .nest("/api/v1", api)
         .fallback(asset)
         .with_state(core)
+        // Leaves the event stream alone: its default predicate skips `text/event-stream`.
+        .layer(CompressionLayer::new())
 }
 
 // Errors
@@ -212,6 +221,19 @@ async fn status(State(core): App, headers: HeaderMap) -> ApiResult<Json<Value>> 
         "latest_version": core.newer_release(),
         "needs_library": core.settings()?.libraries.is_empty(),
         "sites": core.enabled_sites()?,
+        // What a title's page shows as chosen before anyone picks; library names stay with
+        // admins.
+        "defaults": match &user {
+            Some(user) => {
+                let mut defaults = serde_json::to_value(core.defaults()?)
+                    .map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))?;
+                if user.role != Role::Admin {
+                    defaults["libraries"] = json!({});
+                }
+                defaults
+            }
+            None => Value::Null,
+        },
         // Names only, for the library choice on a title's page; paths stay with admins.
         "libraries": match &user {
             Some(user) if user.role == Role::Admin => {
@@ -587,18 +609,22 @@ async fn reject_request(State(core): App, _: Admin, Path(id): Path<i64>) -> ApiR
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn events(
-    State(core): App,
-    _: Session,
-) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
+async fn events(State(core): App, _: Session) -> impl IntoResponse {
     let events = BroadcastStream::new(core.subscribe()).map(|event| {
         // A listener that fell behind lost events; this makes it read the queue again.
         let event = event.unwrap_or(Event::QueueChanged);
-        Ok(SseEvent::default()
+        Ok::<_, Infallible>(SseEvent::default()
             .json_data(event)
             .unwrap_or_else(|_| SseEvent::default().comment("unreadable event")))
     });
-    Sse::new(events).keep_alive(KeepAlive::default())
+    let stream = Sse::new(events).keep_alive(KeepAlive::default());
+    // nginx and similar proxies hold back a response until a buffer fills, which delays
+    // events by minutes; this asks them to pass each event on at once.
+    let headers = [
+        ("x-accel-buffering", "no"),
+        ("cache-control", "no-cache, no-transform"),
+    ];
+    (headers, stream)
 }
 
 // Settings
@@ -692,16 +718,32 @@ async fn public_ip(State(core): App, _: Admin) -> ApiResult<Json<Value>> {
 #[folder = "$CARGO_MANIFEST_DIR/../../web/dist"]
 struct WebApp;
 
-async fn asset(uri: Uri) -> Response {
+async fn asset(uri: Uri, headers: HeaderMap) -> Response {
     let path = uri.path().trim_start_matches('/');
     // Anything that is not a file is a page of the single-page app.
     let found = WebApp::get(path)
         .map(|file| (path, file))
         .or_else(|| WebApp::get("index.html").map(|file| ("index.html", file)));
     match found {
-        Some((_, file)) => {
+        Some((path, file)) => {
+            let tag = format!("\"{}\"", hex(&file.metadata.sha256_hash()[..16]));
+            // Vite names these after their content, so they never change; the page itself
+            // is checked every time, so a new version shows at once.
+            let cache = if path.starts_with("assets/") {
+                "public, max-age=31536000, immutable"
+            } else {
+                "no-cache"
+            };
+            let matches = headers
+                .get(IF_NONE_MATCH)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.split(',').any(|other| other.trim() == tag));
+            let common = [(ETAG, tag), (CACHE_CONTROL, cache.to_owned())];
+            if matches {
+                return (StatusCode::NOT_MODIFIED, common).into_response();
+            }
             let kind = file.metadata.mimetype().to_owned();
-            ([(CONTENT_TYPE, kind)], file.data).into_response()
+            (common, [(CONTENT_TYPE, kind)], file.data).into_response()
         }
         None => {
             let hint =
@@ -709,6 +751,10 @@ async fn asset(uri: Uri) -> Response {
             (StatusCode::NOT_FOUND, hint).into_response()
         }
     }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]
