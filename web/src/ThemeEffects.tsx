@@ -86,6 +86,13 @@ function Background({ piece: name }: { piece: string }) {
       live = false;
     };
   }, [name]);
+  // While the picture runs, text on the page gets a plain plate (see --plate in tokens.css).
+  useEffect(() => {
+    document.documentElement.dataset.backdrop = "ascii";
+    return () => {
+      delete document.documentElement.dataset.backdrop;
+    };
+  }, []);
   const coloured = Boolean(piece?.meta.palette);
   useEffect(() => {
     if (!piece || !art.current) return;

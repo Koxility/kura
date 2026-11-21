@@ -75,7 +75,7 @@
   flex: none;
   width: 12px;
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--size-xs);
 }
 
 .wholeCheck {

@@ -62,3 +62,5 @@ One SQLite file. Settings are a single JSON row whose missing fields fall back t
 ## Frontend
 
 `web/` is a React app built with Vite. All colours, sizes and durations are CSS custom properties in `web/src/styles/tokens.css`; components use those and nothing else.
+
+Colour follows 60-30-10: about 60 % background (`--bg`), 30 % surfaces, lines and text, and 10 % one accent (`--accent`, indigo). The accent only marks what acts or is chosen: the primary button, the current page, a picked option, focus and progress. Green, amber, red and blue stay state colours. Every text colour reaches WCAG AA (4.5:1) on the background, surfaces and hover. While the ASCII background runs, `--plate` turns from transparent to `--bg`, so text, buttons and menus sit on plain plates. Musubi mirrors these tokens.

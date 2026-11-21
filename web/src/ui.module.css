@@ -11,14 +11,23 @@
 }
 
 .lead {
+  width: fit-content;
   max-width: 68ch;
   margin: 16px auto 0;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  background: var(--plate);
   color: var(--text-2);
   text-align: center;
 }
 
+/* A heading inside a page: clearly below the page title, with room above it. */
 .section {
-  margin: 56px 0 16px;
+  width: fit-content;
+  margin: 64px auto 16px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  background: var(--plate);
   text-align: center;
   font-size: var(--size-l);
   font-weight: 600;
@@ -26,7 +35,11 @@
 }
 
 .notice {
-  margin: 32px 0;
+  width: fit-content;
+  margin: 32px auto;
+  padding: 4px 12px;
+  border-radius: var(--radius);
+  background: var(--plate);
   color: var(--text-2);
   text-align: center;
 }
@@ -39,15 +52,16 @@
   overflow-wrap: anywhere;
 }
 
-/* Buttons */
+/* Buttons. One state language everywhere: hover lifts to --hover, what is picked shows the
+   accent, what cannot be used fades to 40 %. */
 
 .button,
 .primary,
 .ghost {
-  padding: 8px 14px;
+  padding: 8px 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: transparent;
+  background: var(--plate);
   color: var(--text);
   font: 500 var(--size-s) / 1.4 var(--font);
   white-space: nowrap;
@@ -64,9 +78,9 @@
 }
 
 .primary {
-  border-color: var(--text);
-  background: var(--text);
-  color: var(--bg);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .primary:hover {
@@ -106,9 +120,12 @@
   transition: border-color var(--fast);
 }
 
-.input:hover,
-.input:focus {
+.input:hover {
   border-color: var(--text-3);
+}
+
+.input:focus {
+  border-color: var(--accent);
 }
 
 .input::placeholder {
@@ -138,8 +155,9 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 14px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--line);
+  background: var(--plate);
 }
 
 .grow {
@@ -158,7 +176,7 @@
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: var(--size-xs);
   white-space: nowrap;
 }
 
@@ -187,6 +205,7 @@
 
 .card {
   display: block;
+  border-radius: var(--radius-cover);
 }
 
 .cover {
@@ -209,7 +228,11 @@
 
 .cardTitle {
   display: block;
-  margin-top: 10px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 8px;
+  padding-right: 4px;
+  background: var(--plate);
   font-size: var(--size-s);
   font-weight: 500;
   line-height: 1.35;
@@ -217,9 +240,12 @@
 
 .cardSite {
   display: block;
+  width: fit-content;
   margin-top: 2px;
+  padding-right: 4px;
+  background: var(--plate);
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--size-xs);
 }
 
 /* Progress: a thin line along the bottom edge of its row */
@@ -229,7 +255,7 @@
   left: 0;
   bottom: -1px;
   height: 2px;
-  background: var(--text);
+  background: var(--accent);
   transition: width 400ms linear;
 }
 
@@ -271,10 +297,11 @@
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: calc(var(--radius) + 3px);
+  background: var(--plate);
 }
 
 .segment {
-  padding: 6px 14px;
+  padding: 6px 12px;
   border: 0;
   border-radius: var(--radius);
   background: transparent;
@@ -293,8 +320,8 @@
 
 .segment[aria-pressed="true"],
 .segment[aria-current="page"] {
-  background: var(--hover);
-  color: var(--text);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* Chips: many small choices, e.g. genres */
@@ -310,10 +337,10 @@
 }
 
 .chip {
-  padding: 5px 12px;
+  padding: 4px 12px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: transparent;
+  background: var(--plate);
   color: var(--text-2);
   font: 400 var(--size-s) / 1.4 var(--font);
   cursor: pointer;
@@ -322,15 +349,24 @@
     color var(--fast);
 }
 
-.chip:hover,
-.chip[aria-pressed="true"] {
+.chip:hover {
   border-color: var(--text-2);
   color: var(--text);
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* A checkbox or switch with its label */
 
 .check {
+  width: fit-content;
+  padding-right: 6px;
+  border-radius: var(--radius);
+  background: var(--plate);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -346,7 +382,7 @@
   width: 16px;
   height: 16px;
   margin: 0;
-  accent-color: var(--text);
+  accent-color: var(--accent);
 }
 
 /* A row of controls above a list */

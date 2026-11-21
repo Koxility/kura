@@ -4,6 +4,16 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-11-21
+
+### Changed
+
+- **One accent colour.** Kura now follows the 60-30-10 rule: mostly the dark background, then surfaces, lines and text, and about 10 % indigo (`#8b7cff`). Indigo marks only what acts or is chosen: primary buttons, the current page in the top bar and in Settings, the picked site, genre or weekday, checkboxes and sliders, the keyboard focus and download progress. Green, amber, red and the blue *Update* label keep meaning state. **Musubi mirrors Kura's colours and should follow.**
+- **Better contrast.** The faintest text colour (dates, hints, the footer) is brighter and now reads at WCAG AA level (at least 4.5:1) on every surface, also on a hovered row.
+- **Readable over the ASCII background.** While it runs, page titles, headings, notes, buttons, menus, list rows and card titles sit on plain plates, so nothing has to be read across the picture. Without the background nothing changes.
+- **Calendar:** titles stay on one line; a long one fades out on the right, and its full name shows on hover.
+- A clearer keyboard focus in the accent colour, one size step for small text instead of loose sizes, spacing on the 4/8-pixel grid, and more room above section headings.
+
 ## [1.3.2] - 2026-11-21
 
 ### Fixed
@@ -250,7 +260,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.3.2...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.3.3...HEAD
+[1.3.3]: https://github.com/Koxility/kura/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/Koxility/kura/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/Koxility/kura/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/Koxility/kura/compare/v1.2.10...v1.3.0

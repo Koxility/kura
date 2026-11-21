@@ -16,6 +16,7 @@
   gap: 2px;
   padding-right: 24px;
   border-right: 1px solid var(--line);
+  background: var(--plate);
 }
 
 .section {
@@ -34,8 +35,9 @@
 }
 
 .section[aria-current="page"] {
-  background: var(--hover);
-  color: var(--text);
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .content {
@@ -43,6 +45,9 @@
 }
 
 .heading {
+  width: fit-content;
+  padding-right: 8px;
+  background: var(--plate);
   margin: 0;
   font-size: var(--size-l);
   font-weight: 600;
@@ -64,6 +69,7 @@
 .content .left {
   justify-content: flex-start;
   margin-inline: 0;
+  padding-inline: 0;
   text-align: left;
 }
 
@@ -80,6 +86,10 @@
 }
 
 .hint {
+  width: fit-content;
+  padding-right: 6px;
+  border-radius: var(--radius);
+  background: var(--plate);
   max-width: 62ch;
   margin: 8px 0 0;
   color: var(--text-3);
@@ -212,7 +222,7 @@
   width: 100%;
   height: 38px;
   margin: 0;
-  accent-color: var(--text);
+  accent-color: var(--accent);
 }
 
 .link {

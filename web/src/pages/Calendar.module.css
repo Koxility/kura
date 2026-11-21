@@ -15,7 +15,7 @@
   padding: 8px 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: transparent;
+  background: var(--plate);
   color: var(--text-2);
   font: inherit;
   font-size: var(--size-s);
@@ -32,9 +32,9 @@
 }
 
 .weekday[aria-current="date"] {
-  border-color: var(--text-3);
-  background: var(--surface);
-  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .weekday:disabled {
@@ -53,6 +53,7 @@
 }
 
 .dayHeading {
+  background: var(--plate);
   display: flex;
   align-items: baseline;
   gap: 12px;
@@ -72,22 +73,32 @@
 }
 
 .today {
-  padding: 1px 8px;
-  border: 1px solid var(--line);
+  padding: 0 8px;
+  border: 1px solid var(--accent);
   border-radius: 999px;
-  color: var(--text-2);
-  font-size: 12px;
+  color: var(--accent);
+  font-size: var(--size-xs);
   font-weight: 500;
+}
+
+/* One line; what does not fit fades out on the right. Short titles never reach the fade. */
+.title {
+  /* The card's full width, so the fade sits at its edge and not at the end of a short title. */
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
 }
 
 /* Under the cover, on one line: out-mark, episode, language, time. */
 .meta {
+  background: var(--plate);
   display: flex;
   align-items: center;
   gap: 5px;
   margin-top: 4px;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--size-xs);
 }
 
 .out {

@@ -1,4 +1,9 @@
-/* Every colour, size and duration in the app comes from here. */
+/* Every colour, size and duration in the app comes from here.
+ *
+ * Colour follows 60-30-10: about 60 % is --bg, 30 % --surface, lines and text, and 10 % the
+ * one accent. The accent marks what is chosen or what acts: the primary button, the current
+ * page, a picked option, focus and progress. Nothing else, so it keeps its meaning. Every text
+ * colour reaches WCAG AA (4.5:1) on --bg and --surface. */
 :root {
   --bg: #0a0a0a;
   --surface: #141414;
@@ -7,9 +12,20 @@
 
   --text: #f5f5f5;
   --text-2: #a1a1a1;
-  --text-3: #6b6b6b;
+  /* 5.3:1 on --bg, 4.9:1 on --surface, 4.6:1 on --hover. */
+  --text-3: #848484;
 
-  /* State only. There is no brand colour: primary actions are --text on --bg. */
+  /* The accent: 6.1:1 on --bg. Text on it is dark (--on-accent), which also reads at 6.1:1. */
+  --accent: #8b7cff;
+  --on-accent: #0a0a0a;
+  /* Picked things: solid, so no background picture shows through. */
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--bg));
+
+  /* Under text that sits on the page. Transparent, until a background picture runs behind the
+   * pages: then text gets a plain plate, so it stays readable. */
+  --plate: transparent;
+
+  /* State only: done, careful, failed, and news about Kura itself. */
   --ok: #3ecf8e;
   --warn: #f5a524;
   --bad: #f04438;
@@ -18,6 +34,7 @@
   --font: "Geist Variable", system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, monospace;
 
+  --size-xs: 12px;
   --size-s: 13px;
   --size-m: 15px;
   --size-l: 20px;
@@ -29,4 +46,8 @@
 
   --rail: 208px;
   --content: 1080px;
+}
+
+:root[data-backdrop="ascii"] {
+  --plate: var(--bg);
 }

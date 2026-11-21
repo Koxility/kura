@@ -108,7 +108,9 @@ function CalendarCard({ card }: { card: Card }) {
           {card.title.charAt(0)}
         </span>
       )}
-      <span className={ui.cardTitle}>{card.title}</span>
+      <span className={`${ui.cardTitle} ${styles.title}`} title={card.title}>
+        {card.title}
+      </span>
       <span className={styles.meta}>
         {card.online && (
           <svg className={styles.out} width="12" height="12" viewBox="0 0 16 16" role="img" aria-label="Out now">

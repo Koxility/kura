@@ -46,7 +46,7 @@ button.entry:hover {
   flex: none;
   width: 12px;
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--size-xs);
 }
 
 /* The name keeps its width; a long path wraps instead of squeezing it. */
