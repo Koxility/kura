@@ -25,17 +25,7 @@
   letter-spacing: -0.02em;
 }
 
-.version {
-  color: var(--text-3);
-  font-size: 12px;
-  transition: color var(--fast);
-}
-
-.version:hover {
-  color: var(--text);
-}
-
-/* A newer release exists: small, quiet, next to the version. */
+/* A newer release exists: small, quiet, next to the name. */
 .update {
   align-self: center;
   padding: 1px 7px;
@@ -94,27 +84,20 @@
   color: var(--text);
 }
 
-/* The user name opens the password change. */
+/* Who is logged in; the account is changed in Settings. */
 .user {
   max-width: 14ch;
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 6px 4px 6px 12px;
-  border: 0;
-  background: transparent;
   color: var(--text-3);
-  font: inherit;
   font-size: var(--size-s);
   white-space: nowrap;
-  cursor: pointer;
-  transition: color var(--fast);
-}
-
-.user:hover {
-  color: var(--text);
 }
 
 .main {
+  /* Pushes the footer to the bottom of a short page. */
+  flex: 1;
   width: 100%;
   max-width: var(--content);
   margin: 0 auto;
@@ -124,6 +107,29 @@
 /* Page titles are centred; lists below them use the full column. */
 .main h1 {
   text-align: center;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 10px;
+  padding: 20px 24px calc(20px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.footer a {
+  transition: color var(--fast);
+}
+
+.footer a:hover {
+  color: var(--text);
+}
+
+.commit {
+  font-family: var(--font-mono);
 }
 
 .centered {

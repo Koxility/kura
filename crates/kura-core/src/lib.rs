@@ -10,6 +10,7 @@ mod naming;
 mod net;
 mod requests;
 mod sync;
+mod theme;
 
 use std::{
     collections::HashMap,
@@ -19,10 +20,11 @@ use std::{
 };
 
 use async_trait::async_trait;
-pub use auth::SESSION_TTL;
+pub use auth::{API_KEY_PREFIX, SESSION_TTL};
 use kura_domain::{
-    Episode, EpisodeId, Genre, HosterLink, Job, JobState, Language, Library, OutputFormat,
-    RemovedTitle, Schedule, Series, SeriesSummary, Settings, SiteId, Stream, TitleRef,
+    CalendarDay, Episode, EpisodeId, Genre, HosterLink, Job, JobState, Language, Library,
+    NewEpisode, OutputFormat, RemovedTitle, Schedule, Series, SeriesSummary, Settings, SiteId,
+    Stream, TitleRef,
 };
 use kura_download::{DownloadError, Progress};
 use kura_hosters::Hoster;
@@ -34,6 +36,7 @@ pub use naming::{DEFAULT_TEMPLATE, default_template};
 pub use net::REPOSITORY;
 use serde::Serialize;
 pub use sync::{SyncStatus, TrackedTitle};
+pub use theme::{MOST_MUSIC_BYTES, Music};
 use tokio::{
     sync::{Notify, broadcast},
     task::AbortHandle,
@@ -189,6 +192,8 @@ pub struct Core {
     logins: Mutex<auth::LoginTries>,
     /// Series folders Jellyfin is asked to scan once the queue is empty.
     pending_scan: Mutex<jellyfin::Pending>,
+    /// The folder of the database, which also holds the theme song.
+    data_dir: Mutex<Option<PathBuf>>,
 }
 
 /// When a site's full list was fetched, and the list.
@@ -240,6 +245,7 @@ impl Core {
             found: Mutex::default(),
             logins: Mutex::default(),
             pending_scan: Mutex::default(),
+            data_dir: Mutex::default(),
         })
     }
 
@@ -316,6 +322,17 @@ impl Core {
     fn marked(&self, mut list: Vec<SeriesSummary>) -> Result<Vec<SeriesSummary>> {
         self.mark_downloaded(&mut list)?;
         Ok(list)
+    }
+
+    /// Episodes the site published recently, newest first; empty for a site without a list.
+    pub async fn new_episodes(&self, site: SiteId) -> Result<Vec<NewEpisode>> {
+        Ok(self.site(site)?.new_episodes().await?)
+    }
+
+    /// The days around today with the episodes announced for them; empty for a site without
+    /// a calendar.
+    pub async fn calendar(&self, site: SiteId) -> Result<Vec<CalendarDay>> {
+        Ok(self.site(site)?.calendar().await?)
     }
 
     pub async fn genres(&self, site: SiteId) -> Result<Vec<Genre>> {

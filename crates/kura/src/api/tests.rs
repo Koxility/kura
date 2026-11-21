@@ -529,3 +529,147 @@ async fn the_web_app_is_cached_by_content_and_compressed() {
     );
     assert_eq!(script.headers()["content-encoding"], "gzip");
 }
+
+/// Another program, such as Musubi, uses an API key instead of a login.
+#[tokio::test]
+async fn api_keys_stand_in_for_a_login() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let user = json!({ "name": "sam", "password": "correct horse", "role": "user" });
+    server.call(Method::POST, "/users", &admin, user).await;
+    let sam = server.log_in("/login", "sam", "correct horse").await;
+
+    let (code, created) = server
+        .call(
+            Method::POST,
+            "/account/keys",
+            &sam,
+            json!({ "name": "Musubi" }),
+        )
+        .await;
+    assert_eq!(code, 200);
+    let secret = created["secret"].as_str().unwrap().to_owned();
+    assert!(secret.starts_with(kura_core::API_KEY_PREFIX));
+    let bearer = |path: &str, key: &str| {
+        let url = format!("{}/api/v1{path}", server.base);
+        server.http.get(url).bearer_auth(key.to_owned()).send()
+    };
+
+    let status: Value = bearer("/status", &secret)
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["user"]["name"], "sam");
+    assert_eq!(bearer("/queue", &secret).await.unwrap().status(), 200);
+    // A key is the user's own rights, not more.
+    assert_eq!(bearer("/settings", &secret).await.unwrap().status(), 403);
+    assert_eq!(bearer("/queue", "kura_wrong").await.unwrap().status(), 401);
+
+    // The list never shows the key itself.
+    let (_, keys) = server.get("/account/keys", &sam).await;
+    assert_eq!(keys[0]["name"], "Musubi");
+    assert!(keys[0].get("secret").is_none());
+    assert!(keys[0]["last_used_at"].is_i64());
+
+    let id = created["key"]["id"].as_i64().unwrap();
+    let path = format!("/account/keys/{id}");
+    // Only its owner deletes it.
+    assert_eq!(
+        server
+            .call(Method::DELETE, &path, &admin, Value::Null)
+            .await
+            .0,
+        404
+    );
+    assert_eq!(
+        server
+            .call(Method::DELETE, &path, &sam, Value::Null)
+            .await
+            .0,
+        204
+    );
+    assert_eq!(bearer("/queue", &secret).await.unwrap().status(), 401);
+}
+
+#[tokio::test]
+async fn every_user_changes_their_own_account() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let user = json!({ "name": "sam", "password": "correct horse", "role": "user" });
+    server.call(Method::POST, "/users", &admin, user).await;
+    let sam = server.log_in("/login", "sam", "correct horse").await;
+
+    let (code, account) = server.get("/account", &sam).await;
+    assert_eq!(code, 200);
+    assert_eq!(account["email"], Value::Null);
+    assert_eq!(account["theme"]["music"], true);
+    assert_eq!(account["theme"]["ascii"], false);
+
+    let taken = json!({ "name": "Admin" });
+    assert_eq!(
+        server
+            .call(Method::PUT, "/account/name", &sam, taken)
+            .await
+            .0,
+        409
+    );
+    let renamed = server.call(
+        Method::PUT,
+        "/account/name",
+        &sam,
+        json!({ "name": "Samira" }),
+    );
+    assert_eq!(renamed.await.1["name"], "Samira");
+    server.log_in("/login", "samira", "correct horse").await;
+
+    let bad = json!({ "email": "not an address" });
+    assert_eq!(
+        server
+            .call(Method::PUT, "/account/email", &sam, bad)
+            .await
+            .0,
+        400
+    );
+    let email = json!({ "email": "sam@example.org" });
+    let (_, account) = server
+        .call(Method::PUT, "/account/email", &sam, email)
+        .await;
+    assert_eq!(account["email"], "sam@example.org");
+    let cleared = server.call(Method::PUT, "/account/email", &sam, json!({ "email": "" }));
+    assert_eq!(cleared.await.1["email"], Value::Null);
+
+    let theme = json!({ "music": false, "ascii": true, "ascii_piece": "tokyo-rain" });
+    let (_, account) = server
+        .call(Method::PUT, "/account/theme", &sam, theme)
+        .await;
+    assert_eq!(account["theme"]["ascii_piece"], "tokyo-rain");
+    let odd = json!({ "music": true, "ascii": true, "ascii_piece": "<script>" });
+    assert_eq!(
+        server
+            .call(Method::PUT, "/account/theme", &sam, odd)
+            .await
+            .0,
+        400
+    );
+
+    // Users still see neither the user list nor the settings.
+    assert_eq!(server.get("/users", &sam).await.0, 403);
+}
+
+#[tokio::test]
+async fn admins_upload_the_theme_song_and_everyone_plays_it() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    // In-memory servers have no data folder: no song.
+    assert_eq!(server.get("/status", &admin).await.1["music"], false);
+    assert_eq!(server.get("/theme/music", &admin).await.0, 404);
+    let upload = server
+        .request(Method::PUT, "/admin/theme/music", &admin)
+        .body(b"ID3fake".to_vec())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(upload.status(), 400);
+}

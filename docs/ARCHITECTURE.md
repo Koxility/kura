@@ -39,6 +39,10 @@ Dependencies point downwards only. The binary talks to `kura-core` and holds no 
 
 For each episode, `kura-core` takes the first language from the settings and walks the hoster order until one resolves and downloads. If none does, it moves to the next language. Every attempt is recorded on the job.
 
+## Other programs
+
+Other programs, such as [Musubi](https://github.com/Koxility/musubi), use the same JSON API as the web app, with a per-user API key instead of the session cookie. [API.md](API.md) lists what a client needs. A key has the rights of its user, no more.
+
 ## Requests and roles
 
 Admins queue downloads directly; normal users send requests, which an admin accepts or rejects. Accepting runs the same queueing as a direct download. The rights are checked in the HTTP layer (`Admin` and `Session` extractors in `crates/kura/src/api.rs`), not only hidden in the web app.

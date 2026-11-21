@@ -10,7 +10,9 @@ mod serienstream;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use kura_domain::{Episode, EpisodeId, Genre, HosterLink, Series, SeriesSummary, SiteId};
+use kura_domain::{
+    CalendarDay, Episode, EpisodeId, Genre, HosterLink, NewEpisode, Series, SeriesSummary, SiteId,
+};
 use scraper::{ElementRef, Selector};
 
 pub use aniworld::AniWorld;
@@ -54,6 +56,17 @@ pub trait Site: Send + Sync {
 
     /// The links are redirects through the site and may expire, so fetch them right before use.
     async fn links(&self, episode: &EpisodeId) -> Result<Vec<HosterLink>>;
+
+    /// Episodes published recently, newest first. Empty for a site without such a list.
+    async fn new_episodes(&self) -> Result<Vec<NewEpisode>> {
+        Ok(Vec::new())
+    }
+
+    /// The days around today with the episodes announced for them. Empty for a site without
+    /// a calendar.
+    async fn calendar(&self) -> Result<Vec<CalendarDay>> {
+        Ok(Vec::new())
+    }
 }
 
 /// The HTTP client all sites and hosters share. It only reaches the internet: names that

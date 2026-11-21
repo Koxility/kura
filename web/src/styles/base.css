@@ -36,3 +36,11 @@ a {
     transition: none !important;
   }
 }
+
+/* The page is a column, so the footer sits at the bottom of a short page. */
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}

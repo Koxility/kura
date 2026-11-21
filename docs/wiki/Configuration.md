@@ -83,7 +83,18 @@ New episodes are queued in the language of the newest episode already downloaded
 
 When the queue is empty (nothing queued, nothing downloading), Kura asks Jellyfin once to scan the series folders that got new episodes: a finished season, a batch from Auto-Sync or a single episode. Only those folders are scanned, never the whole library, and several downloads in a row cause one scan, not one each. A failed download stays in the queue and does not hold the scan back. If Jellyfin mounts a library under another path, set **Path in Jellyfin** for that library under *Settings → Library*.
 
-## Settings → Users
+## Settings → Users / User
+
+Every account has **Your account**: change the name, the password (the current one is needed; other devices are logged out) and an optional email address, which is stored but not used yet. **API keys** let other programs, such as Musubi, use Kura instead of logging in; a key is shown once when it is created and can do what the account can. Admins see the list of all users below that; normal users only see their own account.
+
+## Settings → Theme
+
+Per account:
+
+- **Wii Shop Channel Main Theme** (on by default): plays on a loop while Kura is open. Kura ships without the song; an admin uploads an MP3 here (at most 20 MB), which stays in the data folder. Browsers start sound only after the first click or key on the page.
+- **ASCII background** (off by default): a faint animated scene from [ascii.rest](https://ascii.rest) behind the pages. Pick the scene below it.
+
+## Settings → Users (admins)
 
 Add and remove accounts. See [[Roles and Requests|Roles-and-Requests]].
 

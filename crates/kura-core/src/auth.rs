@@ -11,7 +11,7 @@ use argon2::{
     Argon2,
     password_hash::{PasswordHasher, PasswordVerifier},
 };
-use kura_domain::{Role, User};
+use kura_domain::{Account, ApiKey, Role, Theme, User};
 use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 
@@ -183,7 +183,92 @@ impl Core {
     pub fn logout(&self, token: &str) -> Result<()> {
         Ok(self.store.delete_session(&token_hash(token))?)
     }
+
+    // The own account
+
+    pub fn account(&self, user: &User) -> Result<Account> {
+        let account = self.store.account(user.id)?;
+        account.ok_or(CoreError::Invalid("this account no longer exists"))
+    }
+
+    /// Returns `false` when another user has the name.
+    pub fn rename(&self, user: &User, name: &str) -> Result<bool> {
+        let name = check_name(name)?;
+        Ok(self.store.rename_user(user.id, name)?)
+    }
+
+    /// Stores an email address, or none for an empty one. Nothing is sent to it yet.
+    pub fn set_email(&self, user: &User, email: &str) -> Result<()> {
+        let email = email.trim();
+        let valid = email.len() <= 254
+            && email.split_once('@').is_some_and(|(local, domain)| {
+                !local.is_empty() && domain.contains('.') && !domain.starts_with('.')
+            })
+            && !email.contains(char::is_whitespace);
+        if !email.is_empty() && !valid {
+            return Err(CoreError::Invalid(
+                "this does not look like an email address",
+            ));
+        }
+        Ok(self
+            .store
+            .set_email(user.id, Some(email).filter(|email| !email.is_empty()))?)
+    }
+
+    pub fn set_theme(&self, user: &User, theme: &Theme) -> Result<()> {
+        // The name goes into a script's argument, so it stays a plain id.
+        let piece = &theme.ascii_piece;
+        if piece.is_empty()
+            || piece.len() > 64
+            || !piece
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err(CoreError::Invalid("no such ASCII scene"));
+        }
+        Ok(self.store.set_theme(user.id, theme)?)
+    }
+
+    // API keys, for programs such as Musubi
+
+    /// Creates a key and returns it with the secret, which is shown this once.
+    pub fn create_api_key(&self, user: &User, name: &str) -> Result<(ApiKey, String)> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 64 {
+            return Err(CoreError::Invalid(
+                "the key needs a name of 1 to 64 characters",
+            ));
+        }
+        let mut secret = [0u8; 32];
+        getrandom::fill(&mut secret).map_err(|err| CoreError::Hashing(err.to_string()))?;
+        let secret = format!("{API_KEY_PREFIX}{}", hex(&secret));
+        let key = self
+            .store
+            .create_api_key(user.id, name, &token_hash(&secret), now())?;
+        Ok((key, secret))
+    }
+
+    pub fn api_keys(&self, user: &User) -> Result<Vec<ApiKey>> {
+        Ok(self.store.api_keys(user.id)?)
+    }
+
+    /// Returns whether one of the user's keys was deleted.
+    pub fn delete_api_key(&self, user: &User, id: i64) -> Result<bool> {
+        Ok(self.store.delete_api_key(id, user.id)?)
+    }
+
+    /// The user an API key belongs to.
+    pub fn api_key_user(&self, secret: &str) -> Result<Option<User>> {
+        if !secret.starts_with(API_KEY_PREFIX) {
+            return Ok(None);
+        }
+        Ok(self.store.api_key_user(&token_hash(secret), now())?)
+    }
 }
+
+/// Every API key starts with this, so one is told apart from a session token and found when
+/// it leaks into a log or a repository.
+pub const API_KEY_PREFIX: &str = "kura_";
 
 impl Tries {
     fn forgotten(&self, now: Instant) -> bool {
@@ -212,11 +297,17 @@ fn network(address: IpAddr) -> IpAddr {
 }
 
 /// Returns the trimmed name.
-fn check<'a>(name: &'a str, password: &str) -> Result<&'a str> {
+fn check_name(name: &str) -> Result<&str> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(CoreError::Invalid("the name must have 1 to 64 characters"));
     }
+    Ok(name)
+}
+
+/// Returns the trimmed name.
+fn check<'a>(name: &'a str, password: &str) -> Result<&'a str> {
+    let name = check_name(name)?;
     // The upper limit keeps hashing cheap for anything a client sends.
     if !(8..=256).contains(&password.chars().count()) {
         return Err(CoreError::Invalid(

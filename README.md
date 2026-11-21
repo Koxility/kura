@@ -37,6 +37,8 @@ Kura (蔵, "storehouse") is a self-hosted web app. You browse AniWorld and Serie
 - Already downloaded titles and episodes are marked with a green check, found by IMDb ID or name, also for files Kura did not download itself.
 - Auto-Sync checks downloaded series for new episodes on a schedule, or right now with one click.
 - Tells Jellyfin to scan just the series folders that got new episodes, once the queue is empty.
+- The 50 newest AniWorld episodes on Home, and AniWorld's release calendar in its own tab.
+- API keys per user, so other programs such as [Musubi](https://github.com/Koxility/musubi) can use Kura; see [docs/API.md](docs/API.md).
 
 **Share** — one server for the whole household.
 
@@ -90,12 +92,13 @@ To update, run `docker compose pull && docker compose up -d`. The top bar shows 
 
 | Page | Admin | User |
 |---|---|---|
-| Home | Browse, search, download | Browse, search, request |
+| Home | Browse, search, download, latest episodes | Browse, search, request, latest episodes |
 | Library | The libraries as a folder tree | – |
 | Auto-Sync | Tracked titles, Sync now, exclusions | – |
 | Queue | Watch, cancel, retry, clear | Watch |
 | Request | Accept or reject | Own requests and their status |
-| Settings | Downloads, libraries, sites, Auto-Sync, Jellyfin, users, administration | – |
+| Calendar | AniWorld's release calendar | AniWorld's release calendar |
+| Settings | Downloads, libraries, sites, Auto-Sync, Jellyfin, users, theme, administration | Own account, theme |
 
 Inside every library Kura writes
 

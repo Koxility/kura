@@ -122,6 +122,45 @@ pub struct Genre {
     pub name: String,
 }
 
+/// An episode a site published recently, as its list of new episodes shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewEpisode {
+    pub site: SiteId,
+    pub slug: String,
+    pub title: String,
+    /// 0 for films and specials.
+    pub season: u32,
+    pub number: u32,
+    pub language: Option<Language>,
+    /// As the site shows it, in its time zone, e.g. `21.11.2026 19:05`.
+    pub released: String,
+}
+
+/// One day of a site's release calendar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalendarDay {
+    /// `21.11`.
+    pub date: String,
+    /// Where the day lies from today: -2 is the day before yesterday, 0 today, 2 the day
+    /// after tomorrow. `None` when the site names the day in a way Kura does not know.
+    pub offset: Option<i32>,
+    pub entries: Vec<CalendarEntry>,
+}
+
+/// An episode announced for one day.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalendarEntry {
+    pub slug: String,
+    pub title: String,
+    pub season: u32,
+    pub number: u32,
+    /// `13:40`, approximate, in the site's time zone.
+    pub time: String,
+    pub language: Option<Language>,
+    /// Whether the episode can be watched already.
+    pub online: bool,
+}
+
 /// One way to watch an episode: a hoster's page for one language.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HosterLink {
@@ -220,6 +259,50 @@ pub struct User {
     pub id: i64,
     pub name: String,
     pub role: Role,
+}
+
+/// What a user sees and changes about their own account.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Account {
+    pub id: i64,
+    pub name: String,
+    pub role: Role,
+    /// Stored for later use; nothing is sent to it yet.
+    pub email: Option<String>,
+    pub theme: Theme,
+}
+
+/// A user's look and sound of the web app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Theme {
+    /// Plays the theme song an admin uploaded, on a loop.
+    pub music: bool,
+    /// A faint animated ASCII scene behind the pages.
+    pub ascii: bool,
+    /// Which ascii.rest piece the background shows.
+    pub ascii_piece: String,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            music: true,
+            ascii: false,
+            ascii_piece: "misty-forest".to_owned(),
+        }
+    }
+}
+
+/// A key another program uses instead of logging in. The key itself is shown once, when it
+/// is created; Kura keeps only its hash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiKey {
+    pub id: i64,
+    pub name: String,
+    /// Unix seconds.
+    pub created_at: i64,
+    pub last_used_at: Option<i64>,
 }
 
 /// Server-wide settings, changed by an admin and kept across restarts.

@@ -1,5 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useRef, useState } from "react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
   api,
@@ -7,6 +7,7 @@ import {
   episodeCode,
   hosterNames,
   imdbPattern,
+  type Language,
   languageNames,
   languages,
   type Picked,
@@ -63,6 +64,55 @@ export function SeriesPage() {
   // Asked for when the site has no IMDb ID; holds what to send once answered.
   const [asking, setAsking] = useState<Picked | null>(null);
 
+  // The languages the selection is really offered in, read from the episode lists. The
+  // lists are the ones the season rows show, so opening a season costs nothing more.
+  const allSeasons = series.data?.seasons ?? [];
+  const nothingPicked = wholeSeasons.length === 0 && single.length === 0;
+  const pickedSingles = single.map((key) => key.split(":").map(Number) as [number, number]);
+  const relevantSeasons = nothingPicked
+    ? allSeasons
+    : allSeasons.filter(
+        (season) =>
+          wholeSeasons.includes(season) || pickedSingles.some(([picked]) => picked === season),
+      );
+  const lists = useQueries({
+    queries: relevantSeasons.map((season) => ({
+      queryKey: ["episodes", site, slug, season],
+      queryFn: () => api<Episode[]>(`${base}/seasons/${season}`),
+      staleTime: 10 * 60_000,
+    })),
+  });
+  const available: Language[] | null = (() => {
+    if (relevantSeasons.length === 0 || lists.some((list) => !list.data)) return null;
+    const offered = new Set<Language>();
+    relevantSeasons.forEach((season, index) => {
+      for (const episode of lists[index].data ?? []) {
+        const counts =
+          nothingPicked ||
+          wholeSeasons.includes(season) ||
+          pickedSingles.some(([s, n]) => s === season && n === episode.number);
+        if (counts) for (const offeredIn of episode.languages) offered.add(offeredIn);
+      }
+    });
+    // A list without any language marks says nothing; every language stays.
+    return offered.size > 0 ? languages.filter((option) => offered.has(option)) : null;
+  })();
+  const defaultLanguage = status.data?.defaults?.language ?? undefined;
+  // The default is offered while it is available, or while that is not known yet.
+  const offerDefault =
+    available === null || (defaultLanguage !== undefined && available.includes(defaultLanguage));
+  const availableKey = available?.join() ?? "";
+  // A pick the new selection is not offered in goes back to what is.
+  useEffect(() => {
+    if (available === null) return;
+    if (language !== "" && !available.includes(language as Language)) {
+      setLanguage(offerDefault ? "" : available[0]);
+    } else if (language === "" && !offerDefault) {
+      setLanguage(available[0]);
+    }
+    // `available` is compared by its key; the array is new every render.
+  }, [availableKey, offerDefault, language]);
+
   const send = useMutation({
     mutationFn: ({ picked, imdb }: { picked: Picked; imdb?: string }) =>
       api<{ queued?: number; id?: number }>(admin ? "/queue" : "/requests", "POST", {
@@ -100,7 +150,6 @@ export function SeriesPage() {
   const { summary, description, seasons, imdb_id } = series.data;
   const libraries = status.data?.libraries ?? [];
   const defaults = status.data?.defaults;
-  const defaultLanguage = defaults?.language ?? undefined;
   const defaultHoster = defaults?.hoster ?? undefined;
   const defaultLibrary = defaults?.libraries[summary.site];
   const excluded =
@@ -182,10 +231,13 @@ export function SeriesPage() {
         <label className={ui.field}>
           Language
           <select className={ui.input} value={language} onChange={(event) => setLanguage(event.target.value)}>
-            {/* The default comes first and keeps the fallback to the next languages. */}
-            <option value="">{defaultLanguage ? languageNames[defaultLanguage] : "Default"}</option>
-            {languages
-              .filter((option) => option !== defaultLanguage)
+            {/* The default comes first and keeps the fallback to the next languages. Only
+                languages the picked episodes are offered in are listed. */}
+            {offerDefault && (
+              <option value="">{defaultLanguage ? languageNames[defaultLanguage] : "Default"}</option>
+            )}
+            {(available ?? [])
+              .filter((option) => !offerDefault || option !== defaultLanguage)
               .map((option) => (
                 <option key={option} value={option}>
                   {languageNames[option]}

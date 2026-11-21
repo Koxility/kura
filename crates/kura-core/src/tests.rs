@@ -1452,3 +1452,35 @@ async fn without_jellyfin_nothing_is_asked_and_bad_settings_are_refused() {
         Err(CoreError::Jellyfin(_))
     ));
 }
+
+#[tokio::test]
+async fn the_theme_song_is_kept_in_the_data_folder() {
+    let s = setup(Vec::new(), 1);
+    assert!(!s.core.has_music());
+    assert!(matches!(
+        s.core.save_music(b"ID3x"),
+        Err(CoreError::Invalid(_))
+    ));
+    s.core.set_data_dir(s.path("data"));
+    assert!(s.core.music().unwrap().is_none());
+    assert!(matches!(
+        s.core.save_music(b"<html>"),
+        Err(CoreError::Invalid(_))
+    ));
+    let too_big = vec![0xFF; MOST_MUSIC_BYTES + 1];
+    assert!(matches!(
+        s.core.save_music(&too_big),
+        Err(CoreError::Invalid(_))
+    ));
+
+    s.core.save_music(b"ID3 first").unwrap();
+    assert!(s.core.has_music());
+    let first = s.core.music().unwrap().unwrap();
+    assert_eq!(first.bytes, b"ID3 first");
+    s.core.save_music(b"ID3 the second").unwrap();
+    let second = s.core.music().unwrap().unwrap();
+    assert_ne!(first.etag, second.etag);
+    s.core.remove_music().unwrap();
+    s.core.remove_music().unwrap();
+    assert!(!s.core.has_music());
+}

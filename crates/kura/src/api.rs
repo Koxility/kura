@@ -5,10 +5,13 @@ use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 use axum::{
     Extension, Json, Router,
-    extract::{ConnectInfo, FromRequestParts, Path, Query, State},
+    body::Bytes,
+    extract::{ConnectInfo, DefaultBodyLimit, FromRequestParts, Path, Query, State},
     http::{
         HeaderMap, HeaderValue, StatusCode, Uri,
-        header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, ETAG, IF_NONE_MATCH, SET_COOKIE},
+        header::{
+            AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE, COOKIE, ETAG, IF_NONE_MATCH, SET_COOKIE,
+        },
         request::Parts,
     },
     response::{
@@ -22,8 +25,8 @@ use kura_core::{
     SyncStatus,
 };
 use kura_domain::{
-    Episode, Genre, Job, Language, Picked, Request, Role, Series, SeriesSummary, Settings, SiteId,
-    TitleRef, User,
+    Account, ApiKey, Episode, Genre, Job, Language, Picked, Request, Role, Series, SeriesSummary,
+    Settings, SiteId, Theme, TitleRef, User,
 };
 use rust_embed::RustEmbed;
 use serde::Deserialize;
@@ -59,10 +62,26 @@ fn router(core: Arc<Core>) -> Router {
         .route("/setup", post(setup))
         .route("/login", post(login))
         .route("/logout", post(logout))
+        .route("/account", get(account))
         .route("/account/password", put(change_password))
+        .route("/account/name", put(rename))
+        .route("/account/email", put(set_email))
+        .route("/account/theme", put(set_theme))
+        .route("/account/keys", get(api_keys).post(create_api_key))
+        .route("/account/keys/{id}", delete(delete_api_key))
+        .route("/theme/music", get(music))
+        .route(
+            "/admin/theme/music",
+            put(save_music)
+                .delete(remove_music)
+                // Some room above the limit, so a song just over it gets the clear error.
+                .layer(DefaultBodyLimit::max(kura_core::MOST_MUSIC_BYTES + 1024)),
+        )
         .route("/search", get(search))
         .route("/popular/{site}", get(popular))
         .route("/new/{site}", get(latest))
+        .route("/new-episodes/{site}", get(new_episodes))
+        .route("/calendar/{site}", get(calendar))
         .route("/genres/{site}", get(genres))
         .route("/genres/{site}/{genre}", get(by_genre))
         .route("/random/{site}", get(random))
@@ -145,10 +164,12 @@ fn error(status: StatusCode, message: &str) -> ApiError {
 
 const COOKIE_NAME: &str = "kura_session";
 
-/// A logged-in user. Handlers that take this refuse everyone else.
+/// A logged-in user, by the session cookie of the web app or by an API key another program
+/// sends as `Authorization: Bearer kura_…`. Handlers that take this refuse everyone else.
 struct Session {
     user: User,
-    token: String,
+    /// The session token; `None` when an API key was sent.
+    token: Option<String>,
 }
 
 impl FromRequestParts<Arc<Core>> for Session {
@@ -156,12 +177,32 @@ impl FromRequestParts<Arc<Core>> for Session {
 
     async fn from_request_parts(parts: &mut Parts, core: &Arc<Core>) -> ApiResult<Self> {
         let denied = || error(StatusCode::UNAUTHORIZED, "log in first");
-        let token = session_token(&parts.headers).ok_or_else(denied)?;
-        let user = core.session(token)?.ok_or_else(denied)?;
-        Ok(Self {
+        caller(core, &parts.headers)?.ok_or_else(denied)
+    }
+}
+
+/// Who sends a request: the session cookie wins, then an API key.
+fn caller(core: &Core, headers: &HeaderMap) -> ApiResult<Option<Session>> {
+    if let Some(token) = session_token(headers)
+        && let Some(user) = core.session(token)?
+    {
+        return Ok(Some(Session {
             user,
-            token: token.to_owned(),
-        })
+            token: Some(token.to_owned()),
+        }));
+    }
+    let key = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    match key {
+        Some(key) => {
+            let user = core.api_key_user(key.trim())?;
+            // A key that was sent and is wrong is an error, not a quiet "logged out".
+            let user = user.ok_or_else(|| error(StatusCode::UNAUTHORIZED, "unknown API key"))?;
+            Ok(Some(Session { user, token: None }))
+        }
+        None => Ok(None),
     }
 }
 
@@ -210,14 +251,13 @@ struct Credentials {
 }
 
 async fn status(State(core): App, headers: HeaderMap) -> ApiResult<Json<Value>> {
-    let user = match session_token(&headers) {
-        Some(token) => core.session(token)?,
-        None => None,
-    };
+    let user = caller(&core, &headers)?.map(|session| session.user);
     Ok(Json(json!({
         "needs_setup": core.needs_setup()?,
         "user": user,
         "version": env!("CARGO_PKG_VERSION"),
+        "commit": env!("KURA_COMMIT"),
+        "music": core.has_music(),
         "repository": format!("https://github.com/{REPOSITORY}"),
         "latest_version": core.newer_release(),
         "needs_library": core.settings()?.libraries.is_empty(),
@@ -301,7 +341,9 @@ async fn change_password(
     session: Session,
     Json(form): Json<NewPassword>,
 ) -> ApiResult<StatusCode> {
-    let changed = core.change_password(&session.user, &session.token, &form.current, &form.new);
+    // Over an API key, every session of the account ends.
+    let keep = session.token.as_deref().unwrap_or_default();
+    let changed = core.change_password(&session.user, keep, &form.current, &form.new);
     if changed.await? {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -319,9 +361,115 @@ async fn logout(
     headers: HeaderMap,
     session: Session,
 ) -> ApiResult<Response> {
-    core.logout(&session.token)?;
+    if let Some(token) = &session.token {
+        core.logout(token)?;
+    }
     let https = proxies.client(from.ip(), &headers).https;
     Ok((session_cookie("", 0, https), StatusCode::NO_CONTENT).into_response())
+}
+
+async fn account(State(core): App, session: Session) -> ApiResult<Json<Account>> {
+    Ok(Json(core.account(&session.user)?))
+}
+
+#[derive(Deserialize)]
+struct NewName {
+    name: String,
+}
+
+async fn rename(
+    State(core): App,
+    session: Session,
+    Json(form): Json<NewName>,
+) -> ApiResult<Json<Account>> {
+    if !core.rename(&session.user, &form.name)? {
+        return Err(error(StatusCode::CONFLICT, "this name is taken"));
+    }
+    Ok(Json(core.account(&session.user)?))
+}
+
+#[derive(Deserialize)]
+struct NewEmail {
+    #[serde(default)]
+    email: String,
+}
+
+async fn set_email(
+    State(core): App,
+    session: Session,
+    Json(form): Json<NewEmail>,
+) -> ApiResult<Json<Account>> {
+    core.set_email(&session.user, &form.email)?;
+    Ok(Json(core.account(&session.user)?))
+}
+
+async fn set_theme(
+    State(core): App,
+    session: Session,
+    Json(theme): Json<Theme>,
+) -> ApiResult<Json<Account>> {
+    core.set_theme(&session.user, &theme)?;
+    Ok(Json(core.account(&session.user)?))
+}
+
+async fn api_keys(State(core): App, session: Session) -> ApiResult<Json<Vec<ApiKey>>> {
+    Ok(Json(core.api_keys(&session.user)?))
+}
+
+/// The key itself is in this answer and nowhere else, ever.
+async fn create_api_key(
+    State(core): App,
+    session: Session,
+    Json(form): Json<NewName>,
+) -> ApiResult<Json<Value>> {
+    let (key, secret) = core.create_api_key(&session.user, &form.name)?;
+    Ok(Json(json!({ "key": key, "secret": secret })))
+}
+
+async fn delete_api_key(
+    State(core): App,
+    session: Session,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
+    if core.delete_api_key(&session.user, id)? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(error(StatusCode::NOT_FOUND, "no such key"))
+    }
+}
+
+/// The theme song. Kept by the browser and checked with its tag, so a page load does not
+/// fetch megabytes again.
+async fn music(State(core): App, _: Session, headers: HeaderMap) -> ApiResult<Response> {
+    let music = core.music()?;
+    let music = music.ok_or_else(|| error(StatusCode::NOT_FOUND, "no theme song uploaded"))?;
+    let cache = [
+        (CACHE_CONTROL, "private, no-cache".to_owned()),
+        (ETAG, music.etag.clone()),
+    ];
+    let unchanged = headers
+        .get(IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|tag| tag == music.etag);
+    if unchanged {
+        return Ok((StatusCode::NOT_MODIFIED, cache).into_response());
+    }
+    Ok((
+        cache,
+        [(CONTENT_TYPE, "audio/mpeg".to_owned())],
+        music.bytes,
+    )
+        .into_response())
+}
+
+async fn save_music(State(core): App, _: Admin, body: Bytes) -> ApiResult<StatusCode> {
+    core.save_music(&body)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn remove_music(State(core): App, _: Admin) -> ApiResult<StatusCode> {
+    core.remove_music()?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -385,6 +533,22 @@ async fn latest(
     Path(site): Path<SiteId>,
 ) -> ApiResult<Json<Vec<SeriesSummary>>> {
     Ok(Json(core.latest(site).await?))
+}
+
+async fn new_episodes(
+    State(core): App,
+    _: Session,
+    Path(site): Path<SiteId>,
+) -> ApiResult<Json<Vec<kura_domain::NewEpisode>>> {
+    Ok(Json(core.new_episodes(site).await?))
+}
+
+async fn calendar(
+    State(core): App,
+    _: Session,
+    Path(site): Path<SiteId>,
+) -> ApiResult<Json<Vec<kura_domain::CalendarDay>>> {
+    Ok(Json(core.calendar(site).await?))
 }
 
 async fn genres(

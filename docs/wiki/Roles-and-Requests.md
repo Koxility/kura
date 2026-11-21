@@ -8,7 +8,8 @@ Kura has two roles.
 | Download | yes | no, requests instead |
 | Queue | watch, cancel, retry, clear | watch |
 | Request | accept or reject all requests | own requests and their status |
-| Library, Auto-Sync, Settings | yes | no |
+| Library, Auto-Sync, server settings | yes | no |
+| Calendar, own account and theme in Settings | yes | yes |
 
 The server checks these rights itself, so they hold for the [JSON API](https://github.com/Koxility/kura#api) too, not only in the web app.
 
@@ -29,7 +30,7 @@ Admins can tidy the list with **Clear requests**: it removes accepted and reject
 
 ## Changing your password
 
-Every account, admin or user, changes its own password by clicking its name in the top bar. The current password is needed; other devices logged in with the account are logged out.
+Every account, admin or user, changes its own name, password and email under Settings → User (admins: Settings → Users). The current password is needed to change it; other devices logged in with the account are logged out.
 
 ## Managing users
 

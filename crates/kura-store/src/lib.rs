@@ -8,7 +8,10 @@ use std::{
     sync::{Mutex, MutexGuard, PoisonError},
 };
 
-use kura_domain::{EpisodeId, Job, Language, Picked, Request, RequestState, Role, Settings, User};
+use kura_domain::{
+    Account, ApiKey, EpisodeId, Job, Language, Picked, Request, RequestState, Role, Settings,
+    Theme, User,
+};
 use rusqlite::{Connection, OptionalExtension, Row, params, types::Type};
 use rusqlite_migration::{M, Migrations};
 
@@ -84,6 +87,21 @@ CREATE TABLE requests (
 /// first download on.
 const STARTED_AT: &str = "ALTER TABLE jobs ADD COLUMN started_at INTEGER;";
 
+/// Added in 1.3.0: an optional email and the theme per user, and API keys for other
+/// programs such as Musubi.
+const ACCOUNTS: &str = "
+ALTER TABLE users ADD COLUMN email TEXT;
+ALTER TABLE users ADD COLUMN theme TEXT;
+CREATE TABLE api_keys (
+    id           INTEGER PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    key_hash     TEXT NOT NULL UNIQUE,
+    created_at   INTEGER NOT NULL,
+    last_used_at INTEGER
+);
+";
+
 const JOB_COLUMNS: &str = "id, site, slug, season, episode, series_title, state, progress, error, path, \
      language, hoster, dir, hidden, queued_at, imdb_id, started_at";
 
@@ -144,6 +162,7 @@ impl Store {
             M::up(SCHEMA),
             M::up(REQUESTS_AND_IMDB),
             M::up(STARTED_AT),
+            M::up(ACCOUNTS),
         ])
         .to_latest(&mut conn)?;
         Ok(Self {
@@ -218,6 +237,114 @@ impl Store {
             [id],
         )?;
         Ok(deleted > 0)
+    }
+
+    /// A user's own account: name, role, email and theme.
+    pub fn account(&self, id: i64) -> Result<Option<Account>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT id, name, role, email, theme FROM users WHERE id = ?1",
+                [id],
+                |row| {
+                    let theme: Option<String> = row.get(4)?;
+                    Ok(Account {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        role: text(row, 2)?,
+                        email: row.get(3)?,
+                        // Missing fields fall back to the defaults.
+                        theme: theme
+                            .and_then(|json| serde_json::from_str(&json).ok())
+                            .unwrap_or_default(),
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// Returns `false` when another user has the name. Names compare case-insensitively.
+    pub fn rename_user(&self, id: i64, name: &str) -> Result<bool> {
+        let changed = self.conn().execute(
+            "UPDATE users SET name = ?2 WHERE id = ?1
+             AND NOT EXISTS (SELECT 1 FROM users WHERE name = ?2 AND id != ?1)",
+            params![id, name],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn set_email(&self, id: i64, email: Option<&str>) -> Result<()> {
+        self.conn().execute(
+            "UPDATE users SET email = ?2 WHERE id = ?1",
+            params![id, email],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_theme(&self, id: i64, theme: &Theme) -> Result<()> {
+        self.conn().execute(
+            "UPDATE users SET theme = ?2 WHERE id = ?1",
+            params![id, serde_json::to_string(theme)?],
+        )?;
+        Ok(())
+    }
+
+    // API keys. The caller hashes the key.
+
+    pub fn create_api_key(
+        &self,
+        user_id: i64,
+        name: &str,
+        key_hash: &str,
+        now: i64,
+    ) -> Result<ApiKey> {
+        Ok(self.conn().query_row(
+            "INSERT INTO api_keys (user_id, name, key_hash, created_at) VALUES (?1, ?2, ?3, ?4)
+             RETURNING id, name, created_at, last_used_at",
+            params![user_id, name, key_hash, now],
+            api_key,
+        )?)
+    }
+
+    pub fn api_keys(&self, user_id: i64) -> Result<Vec<ApiKey>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, created_at, last_used_at FROM api_keys WHERE user_id = ?1
+             ORDER BY id",
+        )?;
+        let keys = stmt
+            .query_map([user_id], api_key)?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(keys)
+    }
+
+    /// Returns whether one of the user's keys was deleted.
+    pub fn delete_api_key(&self, id: i64, user_id: i64) -> Result<bool> {
+        let deleted = self.conn().execute(
+            "DELETE FROM api_keys WHERE id = ?1 AND user_id = ?2",
+            params![id, user_id],
+        )?;
+        Ok(deleted > 0)
+    }
+
+    /// The user a key belongs to; notes when it was used.
+    pub fn api_key_user(&self, key_hash: &str, now: i64) -> Result<Option<User>> {
+        let conn = self.conn();
+        let found = conn
+            .query_row(
+                "SELECT u.id, u.name, u.role FROM api_keys k JOIN users u ON u.id = k.user_id
+                 WHERE k.key_hash = ?1",
+                [key_hash],
+                user,
+            )
+            .optional()?;
+        if found.is_some() {
+            conn.execute(
+                "UPDATE api_keys SET last_used_at = ?2 WHERE key_hash = ?1",
+                params![key_hash, now],
+            )?;
+        }
+        Ok(found)
     }
 
     // Sessions. Times are Unix seconds; the caller hashes the token.
@@ -567,6 +694,15 @@ fn user(row: &Row) -> rusqlite::Result<User> {
     })
 }
 
+fn api_key(row: &Row) -> rusqlite::Result<ApiKey> {
+    Ok(ApiKey {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        created_at: row.get(2)?,
+        last_used_at: row.get(3)?,
+    })
+}
+
 fn job(row: &Row) -> rusqlite::Result<Job> {
     Ok(Job {
         id: row.get(0)?,
@@ -842,6 +978,48 @@ mod tests {
             (job.state, job.path.as_deref()),
             (JobState::Cancelled, None)
         );
+    }
+
+    #[test]
+    fn accounts_can_be_renamed_and_keep_email_and_theme() {
+        let (store, admin) = store_with_admin();
+        let other = store.create_user("sam", "h", Role::User).unwrap().unwrap();
+        let account = store.account(admin.id).unwrap().unwrap();
+        assert_eq!((account.email, account.theme), (None, Theme::default()));
+
+        // Names compare without case.
+        assert!(!store.rename_user(admin.id, "SAM").unwrap());
+        assert!(store.rename_user(admin.id, "Boss").unwrap());
+        // Only the case changes.
+        assert!(store.rename_user(other.id, "Sam").unwrap());
+
+        store.set_email(admin.id, Some("boss@example.org")).unwrap();
+        let theme = Theme {
+            music: false,
+            ascii: true,
+            ascii_piece: "tokyo-rain".into(),
+        };
+        store.set_theme(admin.id, &theme).unwrap();
+        let account = store.account(admin.id).unwrap().unwrap();
+        assert_eq!(account.name, "Boss");
+        assert_eq!(account.email.as_deref(), Some("boss@example.org"));
+        assert_eq!(account.theme, theme);
+        assert!(store.credentials("boss").unwrap().is_some());
+    }
+
+    #[test]
+    fn api_keys_belong_to_one_user_and_die_with_them() {
+        let (store, admin) = store_with_admin();
+        let sam = store.create_user("sam", "h", Role::User).unwrap().unwrap();
+        let key = store.create_api_key(sam.id, "Musubi", "hash", 10).unwrap();
+        assert_eq!(store.api_key_user("hash", 20).unwrap(), Some(sam.clone()));
+        assert_eq!(store.api_keys(sam.id).unwrap()[0].last_used_at, Some(20));
+        assert_eq!(store.api_key_user("other", 20).unwrap(), None);
+        // Another user cannot delete it.
+        assert!(!store.delete_api_key(key.id, admin.id).unwrap());
+        assert!(store.delete_user(sam.id).unwrap());
+        assert_eq!(store.api_key_user("hash", 30).unwrap(), None);
+        assert!(store.api_keys(sam.id).unwrap().is_empty());
     }
 
     #[test]

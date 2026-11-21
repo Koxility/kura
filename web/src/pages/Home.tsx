@@ -1,15 +1,17 @@
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useRef } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import {
   api,
   type Genre,
+  type NewEpisode,
   type SeriesSummary,
   type Site,
   siteNames,
   siteNouns,
   statusQuery,
 } from "../api";
+import { LanguageBadge } from "../LanguageBadge";
 import ui from "../ui.module.css";
 import styles from "./Home.module.css";
 import { SeriesGrid } from "./SeriesGrid";
@@ -173,12 +175,49 @@ export function Home() {
                 <h2 className={ui.section}>Popular {noun}</h2>
                 <SeriesGrid query={popular} limit={SHOWN} empty="Nothing listed right now." />
               </section>
+              <LatestEpisodes site={site} />
             </>
           )}
         </>
       )}
     </>
   );
+}
+
+/** The site's newest episodes, for sites that list them (AniWorld). */
+function LatestEpisodes({ site }: { site: Site }) {
+  const episodes = useQuery({
+    queryKey: ["new-episodes", site],
+    queryFn: () => api<NewEpisode[]>(`/new-episodes/${site}`),
+    staleTime: 5 * 60_000,
+  });
+  // A site without such a list, or one that failed, leaves the section out.
+  if (!episodes.data?.length) return null;
+  return (
+    <section>
+      <h2 className={ui.section}>Latest Episodes</h2>
+      <ul className={`${ui.list} ${styles.episodes}`}>
+        {episodes.data.map((episode) => (
+          <li key={`${episode.slug}/${episode.season}/${episode.number}/${episode.language}`}>
+            <Link to={`/series/${episode.site}/${episode.slug}`} className={styles.episode}>
+              <span className={styles.episodeName}>
+                <span className={styles.code}>{releaseCode(episode)}</span>
+                <span className={styles.episodeTitle}>{episode.title}</span>
+              </span>
+              <LanguageBadge language={episode.language} />
+              <span className={styles.when}>{episode.released}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** `S01 E08` as AniWorld lists it, or `Film 3` for season 0. */
+function releaseCode({ season, number }: { season: number; number: number }) {
+  const two = (value: number) => String(value).padStart(2, "0");
+  return season === 0 ? `Film ${number}` : `S${two(season)} E${two(number)}`;
 }
 
 /** Loads the next page when the end of the list scrolls into view. */

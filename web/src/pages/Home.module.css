@@ -17,8 +17,69 @@
   margin-top: 28px;
 }
 
+/* Newest episodes: a scrolling list, about ten rows high. */
+.episodes {
+  max-height: 520px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.episode {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 11px 4px;
+  border-bottom: 1px solid var(--line);
+  transition: background var(--fast);
+}
+
+.episode:hover {
+  background: var(--hover);
+}
+
+.episodeName {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.code {
+  flex: none;
+  min-width: 64px;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.episodeTitle {
+  overflow: hidden;
+  font-size: var(--size-s);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.when {
+  justify-self: end;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 @media (max-width: 720px) {
   .search {
     flex-wrap: wrap;
+  }
+
+  .episode {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .when {
+    grid-column: 1 / -1;
+    justify-self: start;
+    margin-top: -8px;
   }
 }

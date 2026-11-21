@@ -140,6 +140,71 @@
   font-size: var(--size-m);
 }
 
+/* One field and its button on a line, the note below. */
+.oneLine {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  align-items: end;
+  margin-top: 16px;
+}
+
+.oneLine > [role="status"],
+.oneLine > [role="alert"] {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: var(--size-s);
+}
+
+.subheading {
+  margin: 32px 0 4px;
+  font-size: var(--size-m);
+  font-weight: 600;
+}
+
+.password,
+.keys,
+.song {
+  display: grid;
+  gap: 12px;
+}
+
+.password .subheading,
+.keys .subheading {
+  margin-bottom: -4px;
+}
+
+.song {
+  margin: 4px 0 8px;
+}
+
+/* A new key, shown this once. */
+.secret {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  font-size: var(--size-s);
+}
+
+.secret p {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.secret code {
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.link {
+  color: var(--text-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .newUser {
   display: grid;
   grid-template-columns: 1fr 1fr auto auto;
@@ -162,7 +227,8 @@
     border-bottom: 1px solid var(--line);
   }
 
-  .newUser {
+  .newUser,
+  .oneLine {
     grid-template-columns: 1fr;
   }
 }

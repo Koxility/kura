@@ -2,6 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ChangeEvent, type FormEvent, useState } from "react";
 import { NavLink, useParams } from "react-router";
 import {
+  type Account,
+  accountQuery,
+  type ApiKey,
   api,
   hosterNames,
   type Jellyfin as JellyfinSettings,
@@ -15,31 +18,40 @@ import {
   siteNames,
   sites,
   supportedHosters,
+  statusQuery,
+  type Theme,
   type User,
 } from "../api";
+import { type AsciiScene, asciiScenes } from "../ThemeEffects";
 import ui from "../ui.module.css";
 import styles from "./Settings.module.css";
 
+/** Server settings are for admins; everyone has their own account and theme. */
 const sections = [
-  { id: "downloads", title: "Downloads" },
-  { id: "library", title: "Library" },
-  { id: "sites", title: "Sites" },
-  { id: "auto-sync", title: "Auto-Sync" },
-  { id: "jellyfin", title: "Jellyfin" },
-  { id: "users", title: "Users", admin: true },
+  { id: "downloads", title: "Downloads", admin: true },
+  { id: "library", title: "Library", admin: true },
+  { id: "sites", title: "Sites", admin: true },
+  { id: "auto-sync", title: "Auto-Sync", admin: true },
+  { id: "jellyfin", title: "Jellyfin", admin: true },
+  { id: "users", title: "Users", userTitle: "User" },
+  { id: "theme", title: "Theme" },
   { id: "administration", title: "Administration", admin: true },
 ];
 
 export function SettingsPage({ user }: { user: User }) {
-  const settings = useQuery(settingsQuery);
   const admin = user.role === "admin";
-  const shown = sections.filter((section) => admin || !section.admin);
+  const settings = useQuery({ ...settingsQuery, enabled: admin });
+  const shown = sections
+    .filter((section) => admin || !section.admin)
+    .map((section) => ({
+      ...section,
+      title: !admin && section.userTitle ? section.userTitle : section.title,
+    }));
   const section = shown.find((section) => section.id === useParams().section) ?? shown[0];
 
   return (
     <>
       <h1>Settings</h1>
-      {!admin && <p className={ui.lead}>Only an admin can change these.</p>}
       <div className={styles.layout}>
         <nav className={styles.sections} aria-label="Settings sections">
           {shown.map((section) => (
@@ -56,7 +68,12 @@ export function SettingsPage({ user }: { user: User }) {
             </p>
           )}
           {section.id === "users" ? (
-            <Users me={user} />
+            <>
+              <AccountSection />
+              {admin && <Users me={user} />}
+            </>
+          ) : section.id === "theme" ? (
+            <ThemeSection admin={admin} />
           ) : (
             settings.data && (
               // Remounted per section, so leaving one drops its unsaved changes.
@@ -680,6 +697,429 @@ function Order({
   );
 }
 
+/** The own account: name, email, password and API keys. */
+function AccountSection() {
+  const client = useQueryClient();
+  const account = useQuery(accountQuery);
+  const saved = (next: Account) => {
+    client.setQueryData(accountQuery.queryKey, next);
+    // The name in the top bar and in the user list.
+    client.invalidateQueries({ queryKey: ["status"] });
+    client.invalidateQueries({ queryKey: ["users"] });
+  };
+  if (account.isError) {
+    return (
+      <p className={ui.error} role="alert">
+        {account.error.message}
+      </p>
+    );
+  }
+  if (!account.data) return null;
+  return (
+    <section className={styles.form}>
+      <h3 className={`${ui.section} ${styles.left}`}>Your account</h3>
+      <NameForm account={account.data} onSaved={saved} />
+      <EmailForm account={account.data} onSaved={saved} />
+      <PasswordForm />
+      <ApiKeys />
+    </section>
+  );
+}
+
+function NameForm({ account, onSaved }: { account: Account; onSaved: (next: Account) => void }) {
+  const [name, setName] = useState(account.name);
+  const rename = useMutation({
+    mutationFn: () => api<Account>("/account/name", "PUT", { name }),
+    onSuccess: onSaved,
+  });
+  return (
+    <form
+      className={styles.oneLine}
+      onSubmit={(event) => {
+        event.preventDefault();
+        rename.mutate();
+      }}
+    >
+      <label className={ui.field}>
+        Name
+        <input
+          className={ui.input}
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          autoComplete="username"
+          maxLength={64}
+          required
+        />
+      </label>
+      <button className={ui.button} disabled={rename.isPending || name.trim() === account.name}>
+        Change name
+      </button>
+      <Outcome mutation={rename} done="Name changed." />
+    </form>
+  );
+}
+
+function EmailForm({ account, onSaved }: { account: Account; onSaved: (next: Account) => void }) {
+  const [email, setEmail] = useState(account.email ?? "");
+  const save = useMutation({
+    mutationFn: () => api<Account>("/account/email", "PUT", { email }),
+    onSuccess: onSaved,
+  });
+  return (
+    <form
+      className={styles.oneLine}
+      onSubmit={(event) => {
+        event.preventDefault();
+        save.mutate();
+      }}
+    >
+      <label className={ui.field}>
+        <span>
+          Email <span className={styles.faint}>(optional)</span>
+        </span>
+        <input
+          className={ui.input}
+          type="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          autoComplete="email"
+          placeholder="you@example.org"
+        />
+      </label>
+      <button className={ui.button} disabled={save.isPending || email.trim() === (account.email ?? "")}>
+        Save email
+      </button>
+      <Outcome mutation={save} done="Saved. Kura does not send anything to it yet." />
+    </form>
+  );
+}
+
+function PasswordForm() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const change = useMutation({
+    mutationFn: () => api("/account/password", "PUT", { current, new: next }),
+    onSuccess: () => {
+      setCurrent("");
+      setNext("");
+      setAgain("");
+    },
+  });
+  const mismatch = again !== "" && again !== next;
+  return (
+    <form
+      className={styles.password}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!mismatch) change.mutate();
+      }}
+    >
+      <h4 className={styles.subheading}>Password</h4>
+      <label className={ui.field}>
+        Current password
+        <input
+          className={ui.input}
+          type="password"
+          value={current}
+          onChange={(event) => setCurrent(event.target.value)}
+          autoComplete="current-password"
+          required
+        />
+      </label>
+      <label className={ui.field}>
+        New password
+        <input
+          className={ui.input}
+          type="password"
+          value={next}
+          onChange={(event) => setNext(event.target.value)}
+          autoComplete="new-password"
+          minLength={8}
+          required
+        />
+      </label>
+      <label className={ui.field}>
+        New password again
+        <input
+          className={ui.input}
+          type="password"
+          value={again}
+          onChange={(event) => setAgain(event.target.value)}
+          autoComplete="new-password"
+          aria-invalid={mismatch}
+          required
+        />
+      </label>
+      {mismatch && (
+        <p className={ui.error} role="alert">
+          The new passwords differ.
+        </p>
+      )}
+      <div className={`${ui.actions} ${styles.left}`}>
+        <button className={ui.button} disabled={change.isPending || mismatch}>
+          Change password
+        </button>
+        <Outcome
+          mutation={change}
+          done="Password changed. Other devices with this account are logged out."
+        />
+      </div>
+    </form>
+  );
+}
+
+/** Keys for other programs, such as Musubi, instead of a login. */
+function ApiKeys() {
+  const client = useQueryClient();
+  const keys = useQuery({ queryKey: ["api-keys"], queryFn: () => api<ApiKey[]>("/account/keys") });
+  const refresh = () => client.invalidateQueries({ queryKey: ["api-keys"] });
+  const [name, setName] = useState("");
+  const create = useMutation({
+    mutationFn: () => api<{ key: ApiKey; secret: string }>("/account/keys", "POST", { name }),
+    onSuccess: () => {
+      setName("");
+      refresh();
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (id: number) => api(`/account/keys/${id}`, "DELETE"),
+    onSuccess: refresh,
+  });
+  const date = (seconds: number) => new Date(seconds * 1000).toLocaleDateString();
+  const failure = create.error ?? remove.error ?? keys.error;
+
+  return (
+    <div className={styles.keys}>
+      <h4 className={styles.subheading}>API keys</h4>
+      <p className={styles.hint}>
+        Other programs, such as Musubi, use a key instead of your name and password. A key can do
+        what your account can.
+      </p>
+      {keys.data && keys.data.length > 0 && (
+        <ul className={`${ui.list} ${styles.top}`}>
+          {keys.data.map((key) => (
+            <li key={key.id} className={`${ui.row} ${styles.entry}`}>
+              <span className={ui.grow}>{key.name}</span>
+              <span className={ui.muted}>
+                {key.last_used_at ? `Used ${date(key.last_used_at)}` : `Created ${date(key.created_at)}`}
+              </span>
+              <button
+                type="button"
+                className={ui.ghost}
+                onClick={() => {
+                  if (confirm(`Delete the key “${key.name}”? Programs using it stop working.`))
+                    remove.mutate(key.id);
+                }}
+              >
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        className={styles.oneLine}
+        onSubmit={(event) => {
+          event.preventDefault();
+          create.mutate();
+        }}
+      >
+        <label className={ui.field}>
+          New key for
+          <input
+            className={ui.input}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Musubi"
+            maxLength={64}
+            required
+          />
+        </label>
+        <button className={ui.button} disabled={create.isPending}>
+          Create key
+        </button>
+      </form>
+      {create.data && (
+        <div className={styles.secret} role="status">
+          <p>Copy this key now. Kura keeps only a fingerprint of it and cannot show it again.</p>
+          <code className={ui.mono}>{create.data.secret}</code>
+        </div>
+      )}
+      {failure && (
+        <p className={ui.error} role="alert">
+          {failure.message}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** What became of a save: an error, or a short note once it worked. */
+function Outcome({
+  mutation,
+  done,
+}: {
+  mutation: { isSuccess: boolean; isError: boolean; error: Error | null };
+  done: string;
+}) {
+  if (mutation.isError) {
+    return (
+      <span className={ui.error} role="alert">
+        {mutation.error?.message}
+      </span>
+    );
+  }
+  return (
+    <span className={ui.muted} role="status">
+      {mutation.isSuccess && done}
+    </span>
+  );
+}
+
+/** Music and background, per user. Admins also upload the song here. */
+function ThemeSection({ admin }: { admin: boolean }) {
+  const client = useQueryClient();
+  const account = useQuery(accountQuery);
+  const status = useQuery(statusQuery);
+  const save = useMutation({
+    mutationFn: (theme: Theme) => api<Account>("/account/theme", "PUT", theme),
+    // Shown at once; the server's answer replaces it.
+    onMutate: (theme) => {
+      const before = client.getQueryData<Account>(accountQuery.queryKey);
+      if (before) client.setQueryData(accountQuery.queryKey, { ...before, theme });
+      return before;
+    },
+    onError: (_, __, before) => before && client.setQueryData(accountQuery.queryKey, before),
+    onSuccess: (next) => client.setQueryData(accountQuery.queryKey, next),
+  });
+  const theme = account.data?.theme;
+  if (!theme) return null;
+  const set = (part: Partial<Theme>) => save.mutate({ ...theme, ...part });
+  const hasSong = status.data?.music ?? false;
+
+  return (
+    <section className={styles.form}>
+      <label className={`${ui.check} ${styles.toggle}`}>
+        <input
+          type="checkbox"
+          checked={theme.music}
+          onChange={(event) => set({ music: event.target.checked })}
+        />
+        Wii Shop Channel Main Theme
+      </label>
+      <p className={styles.hint}>
+        Plays on a loop while Kura is open. Browsers start sound only after the first click or key
+        on the page.
+        {!hasSong && !admin && " An admin has not added the song yet."}
+      </p>
+      {admin && <SongUpload hasSong={hasSong} />}
+
+      <label className={`${ui.check} ${styles.toggle}`}>
+        <input
+          type="checkbox"
+          checked={theme.ascii}
+          onChange={(event) => set({ ascii: event.target.checked })}
+        />
+        ASCII background
+      </label>
+      <p className={styles.hint}>
+        A faint animated scene behind the pages, from{" "}
+        <a className={styles.link} href="https://ascii.rest/#pieces" target="_blank" rel="noreferrer">
+          ascii.rest
+        </a>
+        .
+      </p>
+      <label className={`${ui.field} ${styles.top}`}>
+        Scene
+        <select
+          className={ui.input}
+          value={theme.ascii_piece}
+          disabled={!theme.ascii}
+          onChange={(event) => set({ ascii_piece: event.target.value })}
+        >
+          {(Object.keys(asciiScenes) as AsciiScene[]).map((id) => (
+            <option key={id} value={id}>
+              {asciiScenes[id].name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {save.isError && (
+        <p className={ui.error} role="alert">
+          {save.error.message}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** The song lives on this server only; Kura ships none of its own. */
+function SongUpload({ hasSong }: { hasSong: boolean }) {
+  const client = useQueryClient();
+  const refresh = () => client.invalidateQueries({ queryKey: ["status"] });
+  const upload = useMutation({
+    mutationFn: async (file: File) => {
+      const response = await fetch("/api/v1/admin/theme/music", {
+        method: "PUT",
+        headers: { "Content-Type": "audio/mpeg" },
+        body: file,
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error ?? `upload failed (${response.status})`);
+      }
+    },
+    onSuccess: refresh,
+  });
+  const remove = useMutation({
+    mutationFn: () => api("/admin/theme/music", "DELETE"),
+    onSuccess: refresh,
+  });
+  const failure = upload.error ?? remove.error;
+
+  return (
+    <div className={styles.song}>
+      <p className={styles.hint}>
+        {hasSong
+          ? "A song is uploaded. It stays on this server."
+          : "Kura ships without the song. Upload an MP3 of it (at most 20 MB); it stays on this server."}
+      </p>
+      <div className={`${ui.actions} ${styles.left}`}>
+        <label className={ui.button}>
+          {upload.isPending ? "Uploading…" : hasSong ? "Replace song" : "Upload song"}
+          <input
+            type="file"
+            accept="audio/mpeg,.mp3"
+            hidden
+            disabled={upload.isPending}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) upload.mutate(file);
+              event.target.value = "";
+            }}
+          />
+        </label>
+        {hasSong && (
+          <button
+            type="button"
+            className={ui.ghost}
+            disabled={remove.isPending}
+            onClick={() => remove.mutate()}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      {failure && (
+        <p className={ui.error} role="alert">
+          {failure.message}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Users({ me }: { me: User }) {
   const client = useQueryClient();
   const users = useQuery({ queryKey: ["users"], queryFn: () => api<User[]>("/users") });
@@ -701,7 +1141,8 @@ function Users({ me }: { me: User }) {
   const failure = add.error ?? remove.error ?? users.error;
 
   return (
-    <section className={styles.form}>
+    <section className={`${styles.form} ${styles.top}`}>
+      <h3 className={`${ui.section} ${styles.left}`}>All users</h3>
       <ul className={`${ui.list} ${styles.top}`}>
         {users.data?.map((user) => (
           <li key={user.id} className={`${ui.row} ${styles.entry}`}>

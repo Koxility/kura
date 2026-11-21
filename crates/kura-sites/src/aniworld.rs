@@ -1,10 +1,14 @@
 use std::{
     collections::HashMap,
-    sync::{Mutex, PoisonError},
+    sync::{Arc, Mutex, PoisonError},
+    time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
-use kura_domain::{Episode, EpisodeId, Genre, HosterLink, Language, Series, SeriesSummary, SiteId};
+use kura_domain::{
+    CalendarDay, CalendarEntry, Episode, EpisodeId, Genre, HosterLink, Language, NewEpisode,
+    Series, SeriesSummary, SiteId,
+};
 use scraper::Html;
 use serde::Deserialize;
 
@@ -19,10 +23,16 @@ const SERIES: &str = "/anime/stream/";
 /// The search sends no covers, so this many hits get theirs from their series page.
 const COVER_LOOKUPS: usize = 24;
 
+/// The home page carries both the newest episodes and the calendar; one fetch serves both
+/// for this long.
+const HOME_TTL: Duration = Duration::from_secs(5 * 60);
+
 pub struct AniWorld {
     http: reqwest::Client,
     /// Covers read from series pages, by slug, so a search again needs no page.
     covers: Mutex<HashMap<String, String>>,
+    /// The home page and when it was fetched.
+    home: Mutex<Option<(Instant, Arc<String>)>>,
 }
 
 impl AniWorld {
@@ -30,7 +40,21 @@ impl AniWorld {
         Self {
             http,
             covers: Mutex::default(),
+            home: Mutex::default(),
         }
+    }
+
+    /// The home page, from memory while it is fresh.
+    async fn home(&self) -> Result<Arc<String>> {
+        let lock = || self.home.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((at, html)) = lock().as_ref()
+            && at.elapsed() < HOME_TTL
+        {
+            return Ok(html.clone());
+        }
+        let html = Arc::new(get(&self.http, &format!("{BASE}/")).await?);
+        *lock() = Some((Instant::now(), html.clone()));
+        Ok(html)
     }
 
     /// Fills in the covers of the first hits from the cache, or from their series pages,
@@ -145,6 +169,22 @@ impl Site for AniWorld {
     async fn episodes(&self, slug: &str, season: u32) -> Result<Vec<Episode>> {
         let html = get(&self.http, &season_url(check_slug(slug)?, season)).await?;
         Ok(parse_episodes(season, &html))
+    }
+
+    async fn new_episodes(&self) -> Result<Vec<NewEpisode>> {
+        let found = parse_new_episodes(&self.home().await?);
+        if found.is_empty() {
+            return Err(SiteError::Layout("newest episodes"));
+        }
+        Ok(found)
+    }
+
+    async fn calendar(&self) -> Result<Vec<CalendarDay>> {
+        let days = parse_calendar(&self.home().await?);
+        if days.is_empty() {
+            return Err(SiteError::Layout("calendar"));
+        }
+        Ok(days)
     }
 
     async fn links(&self, episode: &EpisodeId) -> Result<Vec<HosterLink>> {
@@ -324,6 +364,110 @@ fn flag_language(src: &str) -> Option<Language> {
     ]
     .into_iter()
     .find_map(|(name, language)| src.contains(name).then_some(language))
+}
+
+/// The list "Die 50 neuesten Episoden" on the home page.
+fn parse_new_episodes(html: &str) -> Vec<NewEpisode> {
+    Html::parse_document(html)
+        .select(&sel(".newEpisodeList .row"))
+        .filter_map(|row| {
+            let href = first_attr(row, "a[href]", "href")?;
+            let (slug, season, number) = episode_from_href(href)?;
+            // `Sa, 21.11.2026 19:05 Uhr`: the weekday and the unit go.
+            let when = first_text(row, ".elementFloatRight")?;
+            let when = when
+                .split_once(", ")
+                .map_or(when.as_str(), |(_, rest)| rest);
+            let released = when.trim_end_matches("Uhr").trim().to_owned();
+            // The flags load lazily; the real address is in `data-src`.
+            let flag = first_attr(row, "img.flag[data-src]", "data-src")
+                .or_else(|| first_attr(row, "img.flag[src]", "src"));
+            Some(NewEpisode {
+                site: SiteId::AniWorld,
+                slug,
+                title: first_text(row, "strong")?,
+                season,
+                number,
+                language: flag.and_then(flag_language),
+                released,
+            })
+        })
+        .collect()
+}
+
+/// The calendar on the home page: day tabs and one pane per day.
+fn parse_calendar(html: &str) -> Vec<CalendarDay> {
+    let doc = Html::parse_document(html);
+    doc.select(&sel(".tvSeriesCalendarNavigation li a[href^='#']"))
+        .filter_map(|tab| {
+            let pane_id = tab.value().attr("href")?.trim_start_matches('#');
+            let name = first_text(tab, "span").unwrap_or_default();
+            let date = text(tab).trim_end_matches(name.as_str()).trim().to_owned();
+            let pane = doc
+                .select(&sel(".tvSeriesCalendarContent"))
+                .find(|pane| pane.value().id() == Some(pane_id))?;
+            let entries = pane
+                .select(&sel("a[href]"))
+                .filter_map(calendar_entry)
+                .collect();
+            Some(CalendarDay {
+                date,
+                offset: day_offset(&name),
+                entries,
+            })
+        })
+        .collect()
+}
+
+fn calendar_entry(link: scraper::ElementRef) -> Option<CalendarEntry> {
+    let slug = slug_from(link.value().attr("href")?, SERIES)
+        .or_else(|| episode_from_href(link.value().attr("href")?).map(|(slug, ..)| slug))?;
+    let number_in = |css| -> Option<u32> {
+        first_text(link, css)?
+            .split_whitespace()
+            .last()?
+            .parse()
+            .ok()
+    };
+    let time = first_text(link, ".blue")?;
+    let time = time.trim_start_matches('~').trim_end_matches("Uhr").trim();
+    Some(CalendarEntry {
+        slug,
+        title: first_text(link, ".blue2")?,
+        season: number_in(".blue1").unwrap_or(1),
+        number: number_in(".grey")?,
+        time: time.to_owned(),
+        language: first_attr(link, "img.flag[src]", "src").and_then(flag_language),
+        online: link
+            .select(&sel("[title='Stream online!']"))
+            .next()
+            .is_some(),
+    })
+}
+
+/// The site names the days around today.
+fn day_offset(name: &str) -> Option<i32> {
+    match name {
+        "Vorgestern" => Some(-2),
+        "Gestern" => Some(-1),
+        "Heute" => Some(0),
+        "Morgen" => Some(1),
+        "Übermorgen" => Some(2),
+        _ => None,
+    }
+}
+
+/// `/anime/stream/<slug>/staffel-2/episode-8`, or `/filme/film-3` for season 0.
+fn episode_from_href(href: &str) -> Option<(String, u32, u32)> {
+    let rest = href.strip_prefix(SERIES)?;
+    let mut parts = rest.split('/');
+    let slug = check_slug(parts.next()?).ok()?.to_owned();
+    let season = match parts.next()? {
+        "filme" => 0,
+        season => season.strip_prefix("staffel-")?.parse().ok()?,
+    };
+    let number = parts.next()?.rsplit('-').next()?.parse().ok()?;
+    Some((slug, season, number))
 }
 
 fn parse_links(html: &str) -> Vec<HosterLink> {
@@ -506,6 +650,82 @@ mod tests {
             season_url("one-piece", 3),
             "https://aniworld.to/anime/stream/one-piece/staffel-3"
         );
+    }
+
+    #[test]
+    fn home_page_gives_the_newest_episodes() {
+        let found = parse_new_episodes(include_str!("../fixtures/aniworld_home.html"));
+        assert_eq!(found.len(), 3);
+        assert_eq!(
+            found[0],
+            NewEpisode {
+                site: SiteId::AniWorld,
+                slug: "lantern-road".into(),
+                title: "Lantern Road: The Long Way Home".into(),
+                season: 1,
+                number: 8,
+                language: Some(Language::EnglishSub),
+                released: "21.11.2026 19:05".into(),
+            }
+        );
+        assert_eq!(
+            (found[1].number, found[1].language),
+            (1150, Some(Language::GermanDub))
+        );
+        // Films are season 0.
+        assert_eq!(
+            (found[2].season, found[2].number, found[2].language),
+            (0, 16, Some(Language::GermanSub))
+        );
+    }
+
+    #[test]
+    fn home_page_gives_the_calendar() {
+        let days = parse_calendar(include_str!("../fixtures/aniworld_home.html"));
+        let summary: Vec<_> = days
+            .iter()
+            .map(|day| (day.date.as_str(), day.offset, day.entries.len()))
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                ("20.11", Some(-1), 1),
+                ("21.11", Some(0), 2),
+                ("22.11", Some(1), 0)
+            ]
+        );
+        let today = &days[1].entries;
+        assert_eq!(
+            today[0],
+            CalendarEntry {
+                slug: "one-piece".into(),
+                title: "One Piece".into(),
+                season: 23,
+                number: 1151,
+                time: "09:00".into(),
+                language: Some(Language::GermanDub),
+                online: true,
+            }
+        );
+        // Not out yet: the link names only the series.
+        assert_eq!(
+            (today[1].slug.as_str(), today[1].number, today[1].online),
+            ("hello-witch", 8, false)
+        );
+        assert_eq!(today[1].language, Some(Language::EnglishSub));
+    }
+
+    #[test]
+    fn episode_links_give_slug_season_and_number() {
+        assert_eq!(
+            episode_from_href("/anime/stream/one-piece/staffel-3/episode-12"),
+            Some(("one-piece".into(), 3, 12))
+        );
+        assert_eq!(
+            episode_from_href("/anime/stream/one-piece/filme/film-2"),
+            Some(("one-piece".into(), 0, 2))
+        );
+        assert_eq!(episode_from_href("/anime/stream/one-piece"), None);
     }
 
     /// Talks to the real site: `cargo test -p kura-sites -- --ignored`.

@@ -1,0 +1,24 @@
+/* Behind everything, never in the way: no clicks, no layout, barely there. */
+.background {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  pointer-events: none;
+  /* Washed out: the faintest text colour, then most of that taken away. */
+  color: var(--text-3);
+  opacity: 0.09;
+  /* Strongest in the middle, gone at the edges, so it never frames the page. */
+  mask-image: radial-gradient(ellipse at center, #000 30%, transparent 78%);
+}
+
+/* The scene covers the window: whichever of width or height needs the larger letters. */
+.art {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: max(calc(100vw / (var(--cols) * 0.6)), calc(100vh / var(--rows)));
+  line-height: 1;
+  white-space: pre;
+}

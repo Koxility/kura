@@ -4,6 +4,25 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-21
+
+### Added
+
+- **Latest episodes on Home.** AniWorld's 50 newest episodes at the bottom of the home page: season and episode with the title, the language, and when it came out. Each row opens the title.
+- **Calendar.** A new tab, for every user, with AniWorld's release calendar: the days from the day before yesterday to the day after tomorrow, each with the episodes announced, their time, language and whether they are out yet.
+- **Settings for everyone.** Normal users now have Settings with two sections, *User* and *Theme*. Under *User* every account changes its name, its password and an optional email address (stored, not used yet). Admins find the same under *Users*, above the list of all users.
+- **API keys** under *Settings → User*, so other programs, such as Musubi, can use Kura with `Authorization: Bearer kura_…` instead of a login. A key is shown once and can do what its account can. [docs/API.md](docs/API.md) describes the API a client needs.
+- **Theme**, per account:
+  - *Wii Shop Channel Main Theme*, on by default, plays on a loop while Kura is open. Kura does not ship the song: an admin uploads an MP3 under *Settings → Theme*, and it stays in the data folder. Browsers start sound only after the first click or key on the page.
+  - *ASCII background*, off by default: a faint animated scene from [ascii.rest](https://ascii.rest) behind the pages, in one of eight scenes.
+- A footer with the copyright, the version and the commit the build came from.
+
+### Changed
+
+- A title's page offers only the languages the picked episodes, or the whole title, are really available in. A title only offered with German subtitles no longer lists German dub.
+- The version moved from the top bar to the footer; the *Update* label sits next to the name Kura.
+- Clicking your name in the top bar no longer opens the password change; that is in *Settings → User* now.
+
 ## [1.2.10] - 2026-11-21
 
 ### Added
@@ -211,7 +230,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.10...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/Koxility/kura/compare/v1.2.10...v1.3.0
 [1.2.10]: https://github.com/Koxility/kura/compare/v1.2.9...v1.2.10
 [1.2.9]: https://github.com/Koxility/kura/compare/v1.2.8...v1.2.9
 [1.2.8]: https://github.com/Koxility/kura/compare/v1.2.7...v1.2.8

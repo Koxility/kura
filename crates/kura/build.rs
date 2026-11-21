@@ -1,4 +1,23 @@
 fn main() {
+    // The commit in the footer: given by the image build, else asked from git.
+    println!("cargo::rerun-if-env-changed=KURA_COMMIT");
+    println!("cargo::rerun-if-changed=../../.git/HEAD");
+    let commit = std::env::var("KURA_COMMIT")
+        .ok()
+        .filter(|commit| !commit.trim().is_empty())
+        .or_else(|| {
+            let out = std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .ok()?;
+            out.status
+                .success()
+                .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+        })
+        .map(|commit| commit.trim().chars().take(7).collect::<String>())
+        .unwrap_or_else(|| "unknown".to_owned());
+    println!("cargo::rustc-env=KURA_COMMIT={commit}");
+
     // The web app is embedded from this folder, which is absent until `web/` was built once.
     std::fs::create_dir_all("../../web/dist").expect("web/dist can be created");
 

@@ -10,6 +10,9 @@ RUN bun run build
 
 # 2. Server, with the web app built in
 FROM rust:1-bookworm AS server
+# The commit shown in the footer; the context has no .git to ask.
+ARG COMMIT=unknown
+ENV KURA_COMMIT=${COMMIT}
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates

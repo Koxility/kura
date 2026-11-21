@@ -57,6 +57,63 @@ export interface User {
   role: Role;
 }
 
+/** A user's look and sound of the web app. */
+export interface Theme {
+  /** Plays the theme song an admin uploaded, on a loop. */
+  music: boolean;
+  /** A faint animated ASCII scene behind the pages. */
+  ascii: boolean;
+  ascii_piece: string;
+}
+
+/** The own account, as Settings → User shows it. */
+export interface Account extends User {
+  /** Stored, not used yet. */
+  email: string | null;
+  theme: Theme;
+}
+
+/** A key another program (e.g. Musubi) sends instead of logging in. */
+export interface ApiKey {
+  id: number;
+  name: string;
+  created_at: number;
+  last_used_at: number | null;
+}
+
+/** An episode the site published recently. */
+export interface NewEpisode {
+  site: Site;
+  slug: string;
+  title: string;
+  /** 0 for films and specials. */
+  season: number;
+  number: number;
+  language: Language | null;
+  /** As the site shows it, e.g. `21.11.2026 19:05`. */
+  released: string;
+}
+
+export interface CalendarEntry {
+  slug: string;
+  title: string;
+  season: number;
+  number: number;
+  /** `13:40`, approximate. */
+  time: string;
+  language: Language | null;
+  /** Watchable already. */
+  online: boolean;
+}
+
+export interface CalendarDay {
+  /** `21.11`. */
+  date: string;
+  /** -2 … 2 from today, or null when unknown. */
+  offset: number | null;
+  entries: CalendarEntry[];
+}
+
 export interface Library {
   name: string;
   path: string;
@@ -106,6 +163,10 @@ export interface Status {
   needs_setup: boolean;
   user: User | null;
   version: string;
+  /** Short commit hash of the build, or `unknown`. */
+  commit: string;
+  /** Whether an admin uploaded a theme song. */
+  music: boolean;
   repository: string;
   /** A newer release on GitHub, like `1.2.0`; absent while this one is the newest. */
   latest_version: string | null;
@@ -237,6 +298,11 @@ export function describePicked(picked: Picked) {
 export const settingsQuery = {
   queryKey: ["settings"],
   queryFn: () => api<Settings>("/settings"),
+};
+
+export const accountQuery = {
+  queryKey: ["account"],
+  queryFn: () => api<Account>("/account"),
 };
 
 export const sites: Site[] = ["aniworld", "serienstream"];

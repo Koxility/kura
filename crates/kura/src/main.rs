@@ -72,6 +72,7 @@ async fn serve() -> anyhow::Result<()> {
     let proxies = proxy::TrustedProxies::from_env()
         .map_err(|err| anyhow::anyhow!("KURA_TRUSTED_PROXIES: {err}"))?;
     let core = Core::with_defaults(store)?;
+    core.set_data_dir(data.clone());
     // Asks GitHub for a newer release now, so the top bar can show it from the first page.
     core.newer_release();
 

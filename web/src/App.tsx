@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Link, Navigate, NavLink, Route, Routes } from "react-router";
 import {
   api,
@@ -13,14 +13,15 @@ import {
 import styles from "./App.module.css";
 import { Auth } from "./pages/Auth";
 import { AutoSyncPage } from "./pages/AutoSync";
+import { CalendarPage } from "./pages/Calendar";
 import { Home } from "./pages/Home";
 import { LibraryPage } from "./pages/Library";
 import { LibrarySetup } from "./pages/LibrarySetup";
-import { PasswordDialog } from "./pages/PasswordDialog";
 import { Queue } from "./pages/Queue";
 import { Requests } from "./pages/Requests";
 import { SeriesPage } from "./pages/SeriesPage";
 import { SettingsPage } from "./pages/Settings";
+import { ThemeEffects } from "./ThemeEffects";
 import ui from "./ui.module.css";
 
 const pages = [
@@ -29,7 +30,8 @@ const pages = [
   { path: "/auto-sync", title: "Auto-Sync", admin: true },
   { path: "/queue", title: "Queue" },
   { path: "/requests", title: "Request" },
-  { path: "/settings", title: "Settings", admin: true },
+  { path: "/calendar", title: "Calendar" },
+  { path: "/settings", title: "Settings" },
 ];
 
 export function App() {
@@ -55,7 +57,6 @@ function Shell({ status }: { status: Status }) {
     onSuccess: () => client.resetQueries(),
   });
   const user = status.user!;
-  const [changing, setChanging] = useState(false);
   const admin = user.role === "admin";
   const requests = useQuery({ ...requestsQuery, enabled: admin });
   const open = requests.data?.filter((request) => request.state === "open").length ?? 0;
@@ -67,9 +68,6 @@ function Shell({ status }: { status: Status }) {
           <Link to="/" className={styles.wordmark}>
             Kura
           </Link>
-          <a className={styles.version} href={status.repository} target="_blank" rel="noreferrer">
-            v{status.version}
-          </a>
           {status.latest_version && (
             <a
               className={styles.update}
@@ -108,21 +106,13 @@ function Shell({ status }: { status: Status }) {
               <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
             </svg>
           </a>
-          <button
-            type="button"
-            className={styles.user}
-            title="Change password"
-            aria-label={`${user.name}: change password`}
-            onClick={() => setChanging(true)}
-          >
-            {user.name}
-          </button>
+          <span className={styles.user}>{user.name}</span>
           <button type="button" className={ui.ghost} onClick={() => logout.mutate()}>
             Logout
           </button>
         </nav>
       </header>
-      {changing && <PasswordDialog onClose={() => setChanging(false)} />}
+      <ThemeEffects music={status.music} />
       <main className={styles.main}>
         {status.needs_library && admin ? (
           <LibrarySetup suggestedPath={status.suggested_library_path} />
@@ -130,7 +120,36 @@ function Shell({ status }: { status: Status }) {
           <Pages needsLibrary={status.needs_library} user={user} />
         )}
       </main>
+      <Footer status={status} />
     </>
+  );
+}
+
+/** Copyright, version and the commit the build came from. */
+function Footer({ status }: { status: Status }) {
+  const known = status.commit !== "unknown";
+  return (
+    <footer className={styles.footer}>
+      <span>© {new Date().getFullYear()} Koxility</span>
+      <span aria-hidden="true">·</span>
+      <a href={`${status.repository}/releases/tag/v${status.version}`} target="_blank" rel="noreferrer">
+        Kura v{status.version}
+      </a>
+      <span aria-hidden="true">·</span>
+      {known ? (
+        <a
+          className={styles.commit}
+          href={`${status.repository}/commit/${status.commit}`}
+          target="_blank"
+          rel="noreferrer"
+          title="The commit this build came from"
+        >
+          {status.commit}
+        </a>
+      ) : (
+        <span className={styles.commit}>{status.commit}</span>
+      )}
+    </footer>
   );
 }
 
@@ -149,9 +168,10 @@ function Pages({ needsLibrary, user }: { needsLibrary: boolean; user: User }) {
             <>
               <Route path="/library" element={<LibraryPage />} />
               <Route path="/auto-sync" element={<AutoSyncPage />} />
-              <Route path="/settings/:section?" element={<SettingsPage user={user} />} />
             </>
           )}
+          <Route path="/settings/:section?" element={<SettingsPage user={user} />} />
+          <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/queue" element={<Queue admin={user.role === "admin"} />} />
           <Route path="/requests" element={<Requests admin={user.role === "admin"} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
