@@ -205,10 +205,10 @@ function LatestEpisodes({ site }: { site: Site }) {
         {shown.map((episode) => (
           <li key={`${episode.slug}/${episode.season}/${episode.number}/${episode.language}`}>
             <Link to={`/series/${episode.site}/${episode.slug}`} className={styles.episode}>
-              <span className={styles.when}>{episode.released}</span>
               <span className={styles.code}>{releaseCode(episode)}</span>
               <Flag language={episode.language} />
               <span className={styles.episodeTitle}>{episode.title}</span>
+              <span className={styles.when}>{episode.released}</span>
             </Link>
           </li>
         ))}

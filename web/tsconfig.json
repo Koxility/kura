@@ -8,7 +8,10 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    // The vendored ascii.rest source imports its files by their .ts names.
+    "allowImportingTsExtensions": true,
+    "paths": { "ascii.rest": ["./vendor/ascii.rest/src/index.ts"] }
   },
   "include": ["src", "vite.config.ts"]
 }

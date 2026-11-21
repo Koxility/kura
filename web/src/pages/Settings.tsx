@@ -1117,7 +1117,9 @@ function AsciiLibrary({ theme, onChange }: { theme: Theme; onChange: (part: Part
     const name = pieceFromLink(link);
     if (!name) {
       const asked = link.trim().replace(/^https?:\/\/(www\.)?ascii\.rest\/?/, "").replace(/\/$/, "");
-      setProblem(`ascii.rest has no piece called “${asked || link.trim()}”.`);
+      setProblem(
+        `ascii.rest has no piece called “${asked || link.trim()}”, or it is newer than Kura's copy.`,
+      );
       return;
     }
     setProblem("");
@@ -1186,7 +1188,7 @@ function AsciiLibrary({ theme, onChange }: { theme: Theme; onChange: (part: Part
         <a className={styles.link} href="https://ascii.rest/#pieces" target="_blank" rel="noreferrer">
           ascii.rest
         </a>
-        . Kura carries all of them, so nothing is loaded from there.
+        . Kura carries its own copy of every piece, so nothing is loaded from there.
       </p>
     </>
   );

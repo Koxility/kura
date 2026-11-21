@@ -27,10 +27,10 @@ import ui from "./ui.module.css";
 const pages = [
   { path: "/", title: "Home" },
   { path: "/library", title: "Library", admin: true },
+  { path: "/calendar", title: "Calendar" },
   { path: "/auto-sync", title: "Auto-Sync", admin: true },
   { path: "/queue", title: "Queue" },
   { path: "/requests", title: "Request" },
-  { path: "/calendar", title: "Calendar" },
   { path: "/settings", title: "Settings" },
 ];
 

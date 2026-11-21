@@ -17,10 +17,10 @@
   margin-top: 28px;
 }
 
-/* Newest episodes: when, which episode, language, title. */
+/* Newest episodes: which episode, language, title, and when on the right. */
 .episode {
   display: grid;
-  grid-template-columns: 128px 72px auto minmax(0, 1fr);
+  grid-template-columns: 72px auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
   padding: 11px 4px;
@@ -33,6 +33,7 @@
 }
 
 .when {
+  justify-self: end;
   color: var(--text-3);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -71,5 +72,6 @@
 
   .when {
     grid-column: 1 / -1;
+    margin-top: -2px;
   }
 }

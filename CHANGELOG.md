@@ -4,6 +4,17 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-11-21
+
+### Fixed
+
+- Every piece on ascii.rest can be added as a background, e.g. `https://ascii.rest/planet-scale/`. Kura used the npm package of ascii.rest, which lags behind the website and missed 26 pieces; it now carries a copy of ascii.rest's source (in `web/vendor/ascii.rest`, MIT), so all of them work and still nothing is loaded from ascii.rest.
+
+### Changed
+
+- Latest episodes show the date and time on the right again: episode, language flag and title on the left.
+- *Calendar* sits between *Library* and *Auto-Sync* in the top bar.
+
 ## [1.3.1] - 2026-11-21
 
 ### Changed
@@ -239,7 +250,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.3.2...HEAD
+[1.3.2]: https://github.com/Koxility/kura/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/Koxility/kura/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/Koxility/kura/compare/v1.2.10...v1.3.0
 [1.2.10]: https://github.com/Koxility/kura/compare/v1.2.9...v1.2.10
