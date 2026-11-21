@@ -1,0 +1,11 @@
+/* Small, with a hairline so light flags keep their edge on the dark page. */
+.flag {
+  display: inline-block;
+  flex: none;
+  width: 22px;
+  height: 15px;
+  overflow: hidden;
+  border-radius: 2px;
+  outline: 1px solid var(--line);
+  vertical-align: middle;
+}

@@ -216,15 +216,28 @@ impl Core {
     }
 
     pub fn set_theme(&self, user: &User, theme: &Theme) -> Result<()> {
-        // The name goes into a script's argument, so it stays a plain id.
-        let piece = &theme.ascii_piece;
-        if piece.is_empty()
-            || piece.len() > 64
-            || !piece
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-        {
+        // Piece names pick a module in the web app, so they stay plain ids.
+        let plain = |piece: &String| {
+            !piece.is_empty()
+                && piece.len() <= 64
+                && piece
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        };
+        let library = &theme.ascii_library;
+        if library.len() > MOST_ASCII_PIECES || !library.iter().all(plain) {
             return Err(CoreError::Invalid("no such ASCII scene"));
+        }
+        if !library.contains(&theme.ascii_piece) {
+            return Err(CoreError::Invalid("pick an ASCII scene from your list"));
+        }
+        if theme.volume > 100 {
+            return Err(CoreError::Invalid("the volume goes from 0 to 100"));
+        }
+        if let Some(song) = &theme.song
+            && !self.songs()?.iter().any(|known| known.id == *song)
+        {
+            return Err(CoreError::Invalid("no such song"));
         }
         Ok(self.store.set_theme(user.id, theme)?)
     }
@@ -265,6 +278,9 @@ impl Core {
         Ok(self.store.api_key_user(&token_hash(secret), now())?)
     }
 }
+
+/// More scenes than anyone keeps; bounds what one account stores.
+const MOST_ASCII_PIECES: usize = 100;
 
 /// Every API key starts with this, so one is told apart from a session token and found when
 /// it leaks into a log or a repository.

@@ -996,8 +996,10 @@ mod tests {
         store.set_email(admin.id, Some("boss@example.org")).unwrap();
         let theme = Theme {
             music: false,
+            volume: 30,
             ascii: true,
             ascii_piece: "tokyo-rain".into(),
+            ..Theme::default()
         };
         store.set_theme(admin.id, &theme).unwrap();
         let account = store.account(admin.id).unwrap().unwrap();

@@ -1,120 +1,136 @@
-/* Day tabs in a row, like AniWorld's calendar, drawn as Kura's segmented control. */
-.days {
+/* Monday to Sunday, like AniWorld; stays in reach while the days scroll by. */
+.week {
+  position: sticky;
+  top: 56px;
+  z-index: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 6px;
-  margin: 24px 0 20px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin: 24px 0 8px;
+  padding: 8px 0;
+  background: var(--bg);
 }
 
-.day {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 2px 8px;
-  padding: 10px 12px;
+.weekday {
+  padding: 8px 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: transparent;
   color: var(--text-2);
   font: inherit;
-  text-align: left;
+  font-size: var(--size-s);
+  font-weight: 500;
   cursor: pointer;
   transition:
     background var(--fast),
-    color var(--fast),
-    border-color var(--fast);
+    color var(--fast);
 }
 
-.day:hover {
+.weekday:hover:not(:disabled) {
   background: var(--hover);
   color: var(--text);
 }
 
-.day[aria-selected="true"] {
+.weekday[aria-current="date"] {
   border-color: var(--text-3);
   background: var(--surface);
   color: var(--text);
 }
 
-.date {
-  font-family: var(--font-mono);
-  font-size: var(--size-m);
-  font-weight: 600;
+.weekday:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
-.count {
-  grid-row: span 2;
-  align-self: center;
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: 12px;
+.short {
+  display: none;
 }
 
-.dayName {
-  color: var(--text-3);
-  font-size: 12px;
+/* Each day under its own heading; the sticky week bar stays clear of it. */
+.day {
+  scroll-margin-top: 128px;
+  margin-top: 40px;
 }
 
-.entry {
-  display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) auto 52px;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 4px;
-  border-bottom: 1px solid var(--line);
-  transition: background var(--fast);
-}
-
-.entry:hover {
-  background: var(--hover);
-}
-
-.time {
-  color: var(--text-2);
-  font-family: var(--font-mono);
-  font-size: var(--size-s);
-}
-
-.what {
+.dayHeading {
   display: flex;
-  flex-direction: column;
-  min-width: 0;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 20px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--size-l);
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
-.title {
-  overflow: hidden;
+.date {
+  color: var(--text-3);
+  font-family: var(--font-mono);
   font-size: var(--size-s);
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 400;
 }
 
-.episode {
+.today {
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Under the cover, on one line: out-mark, episode, language, time. */
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
   color: var(--text-3);
   font-size: 12px;
 }
 
-.online,
-.waiting {
-  justify-self: end;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.online {
+.out {
+  flex: none;
   color: var(--ok);
 }
 
-.waiting {
-  color: var(--text-3);
+.code {
+  color: var(--text-2);
+  font-family: var(--font-mono);
+}
+
+.flags {
+  display: inline-flex;
+  gap: 3px;
+}
+
+/* Smaller flags here, so two languages and the time share the line. */
+.flags svg {
+  width: 18px;
+  height: 12px;
+}
+
+.time {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 @media (max-width: 720px) {
-  .entry {
-    grid-template-columns: 48px minmax(0, 1fr) auto;
+  .week {
+    top: 92px;
   }
 
-  .online,
-  .waiting {
+  .long {
     display: none;
+  }
+
+  .short {
+    display: inline;
+  }
+
+  .day {
+    scroll-margin-top: 160px;
   }
 }

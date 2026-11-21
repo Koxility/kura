@@ -21,6 +21,7 @@ async-trait.workspace = true
 chrono.workspace = true
 reqwest.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 tracing.workspace = true
@@ -29,6 +30,5 @@ sha2 = "0.11.1"
 getrandom = "0.4.3"
 
 [dev-dependencies]
-serde_json.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["time", "net", "io-util"] }

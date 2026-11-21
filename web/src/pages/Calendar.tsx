@@ -1,20 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
 import { Link } from "react-router";
-import { api, type CalendarDay, statusQuery } from "../api";
-import { LanguageBadge } from "../LanguageBadge";
+import { api, type CalendarDay, type CalendarEntry, type Language, statusQuery } from "../api";
+import { Flag } from "../Flag";
 import ui from "../ui.module.css";
 import styles from "./Calendar.module.css";
 
-const dayNames: Record<number, string> = {
-  [-2]: "Day before yesterday",
-  [-1]: "Yesterday",
-  0: "Today",
-  1: "Tomorrow",
-  2: "Day after tomorrow",
-};
+const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-/** AniWorld's release calendar: a few days around today, one tab each. */
+/** One card: an episode with every language it comes out in at that time. */
+interface Card extends Omit<CalendarEntry, "language"> {
+  languages: Language[];
+}
+
+/** AniWorld's calendar: today first, then the following days, each with its titles. */
 export function CalendarPage() {
   const status = useQuery(statusQuery);
   // Only AniWorld publishes a calendar.
@@ -26,12 +24,13 @@ export function CalendarPage() {
     staleTime: 5 * 60_000,
   });
   const days = calendar.data ?? [];
-  const today = Math.max(
-    0,
-    days.findIndex((day) => day.offset === 0),
-  );
-  const [picked, setPicked] = useState<number | null>(null);
-  const shown = days[picked ?? today];
+
+  /** The sections run from today for a week, so each weekday's is its next one. */
+  function jump(weekday: number) {
+    document
+      .getElementById(`day-${weekday}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <>
@@ -51,55 +50,107 @@ export function CalendarPage() {
 
       {days.length > 0 && (
         <>
-          <div className={styles.days} role="tablist" aria-label="Day">
-            {days.map((day, index) => (
-              <button
-                key={day.date}
-                type="button"
-                role="tab"
-                aria-selected={day === shown}
-                className={styles.day}
-                onClick={() => setPicked(index)}
-              >
-                <span className={styles.date}>{day.date}</span>
-                <span className={styles.dayName}>
-                  {day.offset !== null ? (dayNames[day.offset] ?? day.date) : day.date}
-                </span>
-                <span className={styles.count}>{day.entries.length}</span>
-              </button>
-            ))}
-          </div>
+          <nav className={styles.week} aria-label="Weekday">
+            {weekdays.map((name, index) => {
+              const day = days.find((day) => day.weekday === index + 1);
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  className={styles.weekday}
+                  aria-current={day?.today ? "date" : undefined}
+                  disabled={!day}
+                  onClick={() => jump(index + 1)}
+                >
+                  <span className={styles.long}>{name}</span>
+                  <span className={styles.short} aria-hidden="true">
+                    {name.slice(0, 2)}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
 
-          {shown && (
-            <ul className={ui.list} role="tabpanel">
-              {shown.entries.length === 0 && <li className={ui.notice}>Nothing announced.</li>}
-              {shown.entries.map((entry, index) => (
-                // A title often appears once per language at the same time.
-                // biome-ignore lint/suspicious/noArrayIndexKey: entries have no id of their own
-                <li key={index}>
-                  <Link to={`/series/aniworld/${entry.slug}`} className={styles.entry}>
-                    <span className={styles.time}>{entry.time}</span>
-                    <span className={styles.what}>
-                      <span className={styles.title}>{entry.title}</span>
-                      <span className={styles.episode}>
-                        {entry.season === 0 ? "Films" : `Season ${entry.season}`} · Episode{" "}
-                        {entry.number}
-                      </span>
-                    </span>
-                    <LanguageBadge language={entry.language} />
-                    <span
-                      className={entry.online ? styles.online : styles.waiting}
-                      title={entry.online ? "Out now" : "Not out yet"}
-                    >
-                      {entry.online ? "Out" : "Soon"}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+          {days.map((day) => (
+            <section key={day.date} id={`day-${day.weekday}`} className={styles.day}>
+              <h2 className={styles.dayHeading}>
+                {weekdays[day.weekday - 1]}
+                <span className={styles.date}>{day.date}</span>
+                {day.today && <span className={styles.today}>Today</span>}
+              </h2>
+              {day.entries.length === 0 ? (
+                <p className={ui.notice}>Nothing announced.</p>
+              ) : (
+                <ul className={ui.grid}>
+                  {cards(day.entries).map((card) => (
+                    <li key={`${card.slug}/${card.season}/${card.number}/${card.time}`}>
+                      <CalendarCard card={card} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          ))}
         </>
       )}
     </>
   );
+}
+
+function CalendarCard({ card }: { card: Card }) {
+  return (
+    <Link to={`/series/aniworld/${card.slug}`} className={ui.card}>
+      {card.cover_url ? (
+        // The title below names the series, so the image is decoration.
+        <img className={ui.cover} src={card.cover_url} alt="" loading="lazy" referrerPolicy="no-referrer" />
+      ) : (
+        <span className={ui.cover} aria-hidden="true">
+          {card.title.charAt(0)}
+        </span>
+      )}
+      <span className={ui.cardTitle}>{card.title}</span>
+      <span className={styles.meta}>
+        {card.online && (
+          <svg className={styles.out} width="12" height="12" viewBox="0 0 16 16" role="img" aria-label="Out now">
+            <title>Out now</title>
+            <path d="M3 8.5 6.5 12 13 4.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+        <span className={styles.code}>{code(card)}</span>
+        <span className={styles.flags}>
+          {card.languages.map((language) => (
+            <Flag key={language} language={language} />
+          ))}
+        </span>
+        <span className={styles.time}>{card.time}</span>
+      </span>
+    </Link>
+  );
+}
+
+/** One card per episode and time; AniWorld lists each language on its own. */
+function cards(entries: CalendarEntry[]): Card[] {
+  const merged: Card[] = [];
+  for (const { language, ...entry } of entries) {
+    const same = merged.find(
+      (card) =>
+        card.slug === entry.slug &&
+        card.season === entry.season &&
+        card.number === entry.number &&
+        card.time === entry.time,
+    );
+    if (same) {
+      if (language && !same.languages.includes(language)) same.languages.push(language);
+      same.online ||= entry.online;
+    } else {
+      merged.push({ ...entry, languages: language ? [language] : [] });
+    }
+  }
+  return merged;
+}
+
+/** `S02E07`, or `Film 22`. */
+function code({ season, number }: { season: number; number: number }) {
+  const two = (value: number) => String(value).padStart(2, "0");
+  return season === 0 ? `Film ${number}` : `S${two(season)}E${two(number)}`;
 }

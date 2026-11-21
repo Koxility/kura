@@ -59,11 +59,24 @@ export interface User {
 
 /** A user's look and sound of the web app. */
 export interface Theme {
-  /** Plays the theme song an admin uploaded, on a loop. */
+  /** Plays a song an admin uploaded, on a loop. */
   music: boolean;
+  /** Id of the song; null plays the first one. */
+  song: string | null;
+  /** 0 to 100. */
+  volume: number;
   /** A faint animated ASCII scene behind the pages. */
   ascii: boolean;
+  /** One of `ascii_library`. */
   ascii_piece: string;
+  /** ascii.rest piece names this account keeps to choose from. */
+  ascii_library: string[];
+}
+
+/** A song an admin uploaded for the background music. */
+export interface Song {
+  id: string;
+  name: string;
 }
 
 /** The own account, as Settings → User shows it. */
@@ -97,6 +110,8 @@ export interface NewEpisode {
 export interface CalendarEntry {
   slug: string;
   title: string;
+  cover_url: string | null;
+  /** 0 for films. */
   season: number;
   number: number;
   /** `13:40`, approximate. */
@@ -107,10 +122,11 @@ export interface CalendarEntry {
 }
 
 export interface CalendarDay {
-  /** `21.11`. */
+  /** 1 is Monday, 7 Sunday. */
+  weekday: number;
+  /** `21.11.2026`. */
   date: string;
-  /** -2 … 2 from today, or null when unknown. */
-  offset: number | null;
+  today: boolean;
   entries: CalendarEntry[];
 }
 
@@ -165,8 +181,6 @@ export interface Status {
   version: string;
   /** Short commit hash of the build, or `unknown`. */
   commit: string;
-  /** Whether an admin uploaded a theme song. */
-  music: boolean;
   repository: string;
   /** A newer release on GitHub, like `1.2.0`; absent while this one is the newest. */
   latest_version: string | null;
@@ -303,6 +317,11 @@ export const settingsQuery = {
 export const accountQuery = {
   queryKey: ["account"],
   queryFn: () => api<Account>("/account"),
+};
+
+export const songsQuery = {
+  queryKey: ["songs"],
+  queryFn: () => api<Song[]>("/theme/songs"),
 };
 
 export const sites: Site[] = ["aniworld", "serienstream"];

@@ -4,6 +4,15 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-21
+
+### Changed
+
+- **Calendar** shows AniWorld's whole week, read from its calendar page: a Monday-to-Sunday bar on top, and below it the days stacked from today on, each under its weekday and date. Every day is a grid of covers like the lists on Home; under each cover are the title, a green check when the episode is out, `S02E07`, the language flags and the time. A weekday in the bar scrolls to its next date. One episode coming out in several languages at the same time is one card with several flags.
+- **Latest episodes** on Home read left to right: date and time, `S01 E08`, the language as a flag the way AniWorld marks it (German flag for the dub, the Japanese flag with a German or British corner for subtitles), and the title. The list no longer scrolls inside the page: it shows 12 episodes and a *Show all* button.
+- **Background music** has a *Song* choice and a *Volume* slider per account, admins included. Admins add and remove songs under *Settings → Theme*; the song of 1.3.0 is kept and listed as "Wii Shop Channel Main Theme".
+- **ASCII background** keeps a list of scenes per account. Paste the link of any piece from ascii.rest to add it, pick one, remove the others. Pieces with colour show their colours, washed out; every piece ships with Kura, so nothing is loaded from ascii.rest.
+
 ## [1.3.0] - 2026-11-21
 
 ### Added
@@ -230,7 +239,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/Koxility/kura/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/Koxility/kura/compare/v1.2.10...v1.3.0
 [1.2.10]: https://github.com/Koxility/kura/compare/v1.2.9...v1.2.10
 [1.2.9]: https://github.com/Koxility/kura/compare/v1.2.8...v1.2.9

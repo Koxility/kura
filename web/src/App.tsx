@@ -112,7 +112,7 @@ function Shell({ status }: { status: Status }) {
           </button>
         </nav>
       </header>
-      <ThemeEffects music={status.music} />
+      <ThemeEffects />
       <main className={styles.main}>
         {status.needs_library && admin ? (
           <LibrarySetup suggestedPath={status.suggested_library_path} />

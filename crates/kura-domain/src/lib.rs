@@ -139,11 +139,11 @@ pub struct NewEpisode {
 /// One day of a site's release calendar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CalendarDay {
-    /// `21.11`.
+    /// 1 is Monday, 7 Sunday.
+    pub weekday: u8,
+    /// `21.11.2026`.
     pub date: String,
-    /// Where the day lies from today: -2 is the day before yesterday, 0 today, 2 the day
-    /// after tomorrow. `None` when the site names the day in a way Kura does not know.
-    pub offset: Option<i32>,
+    pub today: bool,
     pub entries: Vec<CalendarEntry>,
 }
 
@@ -152,6 +152,8 @@ pub struct CalendarDay {
 pub struct CalendarEntry {
     pub slug: String,
     pub title: String,
+    pub cover_url: Option<String>,
+    /// 0 for films and specials.
     pub season: u32,
     pub number: u32,
     /// `13:40`, approximate, in the site's time zone.
@@ -276,22 +278,50 @@ pub struct Account {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Theme {
-    /// Plays the theme song an admin uploaded, on a loop.
+    /// Plays a song an admin uploaded, on a loop.
     pub music: bool,
+    /// The id of the song; `None` plays the first one.
+    pub song: Option<String>,
+    /// 0 to 100.
+    pub volume: u8,
     /// A faint animated ASCII scene behind the pages.
     pub ascii: bool,
-    /// Which ascii.rest piece the background shows.
+    /// Which ascii.rest piece the background shows; one of `ascii_library`.
     pub ascii_piece: String,
+    /// The ascii.rest pieces this account keeps to choose from.
+    pub ascii_library: Vec<String>,
 }
+
+/// The scenes every account starts with.
+pub const DEFAULT_ASCII_LIBRARY: [&str; 8] = [
+    "misty-forest",
+    "tokyo-rain",
+    "night-coast",
+    "kyoto-dusk",
+    "lantern-lake",
+    "ocean-sunset",
+    "aurora-fjord",
+    "snowfall",
+];
 
 impl Default for Theme {
     fn default() -> Self {
         Self {
             music: true,
+            song: None,
+            volume: 50,
             ascii: false,
-            ascii_piece: "misty-forest".to_owned(),
+            ascii_piece: DEFAULT_ASCII_LIBRARY[0].to_owned(),
+            ascii_library: DEFAULT_ASCII_LIBRARY.map(String::from).to_vec(),
         }
     }
+}
+
+/// A song an admin uploaded for the background music.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Song {
+    pub id: String,
+    pub name: String,
 }
 
 /// A key another program uses instead of logging in. The key itself is shown once, when it

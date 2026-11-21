@@ -23,8 +23,7 @@ const SERIES: &str = "/anime/stream/";
 /// The search sends no covers, so this many hits get theirs from their series page.
 const COVER_LOOKUPS: usize = 24;
 
-/// The home page carries both the newest episodes and the calendar; one fetch serves both
-/// for this long.
+/// The home page lists the newest episodes; one fetch serves for this long.
 const HOME_TTL: Duration = Duration::from_secs(5 * 60);
 
 pub struct AniWorld {
@@ -180,7 +179,8 @@ impl Site for AniWorld {
     }
 
     async fn calendar(&self) -> Result<Vec<CalendarDay>> {
-        let days = parse_calendar(&self.home().await?);
+        let html = get(&self.http, &format!("{BASE}/animekalender")).await?;
+        let days = parse_calendar(&html);
         if days.is_empty() {
             return Err(SiteError::Layout("calendar"));
         }
@@ -395,66 +395,87 @@ fn parse_new_episodes(html: &str) -> Vec<NewEpisode> {
         .collect()
 }
 
-/// The calendar on the home page: day tabs and one pane per day.
+/// The page "Animekalender": one section per day, today first, then the next six days.
 fn parse_calendar(html: &str) -> Vec<CalendarDay> {
-    let doc = Html::parse_document(html);
-    doc.select(&sel(".tvSeriesCalendarNavigation li a[href^='#']"))
-        .filter_map(|tab| {
-            let pane_id = tab.value().attr("href")?.trim_start_matches('#');
-            let name = first_text(tab, "span").unwrap_or_default();
-            let date = text(tab).trim_end_matches(name.as_str()).trim().to_owned();
-            let pane = doc
-                .select(&sel(".tvSeriesCalendarContent"))
-                .find(|pane| pane.value().id() == Some(pane_id))?;
-            let entries = pane
-                .select(&sel("a[href]"))
-                .filter_map(calendar_entry)
-                .collect();
+    Html::parse_document(html)
+        .select(&sel("section.calendarList[id]"))
+        .filter_map(|section| {
+            let weekday = weekday(section.value().id()?)?;
+            // `Samstag, 21.11.2026 (heute)`.
+            let heading = first_text(section, "h3")?;
+            let date = heading
+                .split_whitespace()
+                .find(|word| word.len() == 10 && word.chars().filter(|c| *c == '.').count() == 2)?
+                .to_owned();
             Some(CalendarDay {
+                weekday,
                 date,
-                offset: day_offset(&name),
-                entries,
+                today: heading.contains("(heute)"),
+                entries: section
+                    .select(&sel(".seriesListContainer a[href]"))
+                    .filter_map(calendar_entry)
+                    .collect(),
             })
         })
         .collect()
 }
 
-fn calendar_entry(link: scraper::ElementRef) -> Option<CalendarEntry> {
-    let slug = slug_from(link.value().attr("href")?, SERIES)
-        .or_else(|| episode_from_href(link.value().attr("href")?).map(|(slug, ..)| slug))?;
-    let number_in = |css| -> Option<u32> {
-        first_text(link, css)?
-            .split_whitespace()
-            .last()?
-            .parse()
-            .ok()
-    };
-    let time = first_text(link, ".blue")?;
+fn calendar_entry(card: scraper::ElementRef) -> Option<CalendarEntry> {
+    let href = card.value().attr("href")?;
+    let path = href.strip_prefix(BASE).unwrap_or(href);
+    // An episode that is out links to itself, one that is not to its series.
+    let slug =
+        slug_from(path, SERIES).or_else(|| episode_from_href(path).map(|(slug, ..)| slug))?;
+    let smalls: Vec<_> = card.select(&sel("small")).collect();
+    let (season, number) = episode_code(&text(*smalls.first()?))?;
+    let time = text(*smalls.get(1)?);
     let time = time.trim_start_matches('~').trim_end_matches("Uhr").trim();
+    // The covers load lazily; the real address is in `data-src`.
+    let cover = first_attr(card, "img[data-src*='/cover/']", "data-src")
+        .or_else(|| first_attr(card, "img[src*='/cover/']", "src"))
+        .filter(|src| src.starts_with('/') || src.starts_with("http"));
+    let flag = smalls[0].select(&sel("img.flag")).find_map(|img| {
+        let value = img.value();
+        value.attr("data-src").or_else(|| value.attr("src"))
+    });
     Some(CalendarEntry {
         slug,
-        title: first_text(link, ".blue2")?,
-        season: number_in(".blue1").unwrap_or(1),
-        number: number_in(".grey")?,
+        title: first_text(card, "h3.seriesTitle")?,
+        cover_url: cover.map(|src| absolute(BASE, src)),
+        season,
+        number,
         time: time.to_owned(),
-        language: first_attr(link, "img.flag[src]", "src").and_then(flag_language),
-        online: link
+        language: flag.and_then(flag_language),
+        online: card
             .select(&sel("[title='Stream online!']"))
             .next()
             .is_some(),
     })
 }
 
-/// The site names the days around today.
-fn day_offset(name: &str) -> Option<i32> {
-    match name {
-        "Vorgestern" => Some(-2),
-        "Gestern" => Some(-1),
-        "Heute" => Some(0),
-        "Morgen" => Some(1),
-        "Übermorgen" => Some(2),
-        _ => None,
+/// The section ids name the weekdays in German.
+fn weekday(id: &str) -> Option<u8> {
+    let days = [
+        "montag",
+        "dienstag",
+        "mittwoch",
+        "donnerstag",
+        "freitag",
+        "samstag",
+        "sonntag",
+    ];
+    let index = days.iter().position(|day| *day == id)?;
+    u8::try_from(index + 1).ok()
+}
+
+/// `S02E07` is season 2, episode 7; `Film 22` is film 22, kept as season 0.
+fn episode_code(text: &str) -> Option<(u32, u32)> {
+    let code = text.split_whitespace().collect::<Vec<_>>();
+    if let ["Film", number, ..] = code.as_slice() {
+        return Some((0, number.parse().ok()?));
     }
+    let (season, number) = code.first()?.strip_prefix('S')?.split_once('E')?;
+    Some((season.parse().ok()?, number.parse().ok()?))
 }
 
 /// `/anime/stream/<slug>/staffel-2/episode-8`, or `/filme/film-3` for season 0.
@@ -680,39 +701,60 @@ mod tests {
     }
 
     #[test]
-    fn home_page_gives_the_calendar() {
-        let days = parse_calendar(include_str!("../fixtures/aniworld_home.html"));
+    fn calendar_page_gives_the_days_with_their_episodes() {
+        let days = parse_calendar(include_str!("../fixtures/aniworld_calendar.html"));
         let summary: Vec<_> = days
             .iter()
-            .map(|day| (day.date.as_str(), day.offset, day.entries.len()))
+            .map(|day| (day.weekday, day.date.as_str(), day.today, day.entries.len()))
             .collect();
         assert_eq!(
             summary,
             [
-                ("20.11", Some(-1), 1),
-                ("21.11", Some(0), 2),
-                ("22.11", Some(1), 0)
+                (6, "21.11.2026", true, 2),
+                (7, "22.11.2026", false, 1),
+                (4, "26.11.2026", false, 1)
             ]
         );
-        let today = &days[1].entries;
         assert_eq!(
-            today[0],
+            days[0].entries[0],
             CalendarEntry {
-                slug: "one-piece".into(),
-                title: "One Piece".into(),
-                season: 23,
-                number: 1151,
-                time: "09:00".into(),
-                language: Some(Language::GermanDub),
+                slug: "keroro".into(),
+                title: "KERORO☆".into(),
+                cover_url: Some(
+                    "https://aniworld.to/public/img/cover/keroro-stream-cover-GsXmMdD4FdyHojPhXtl49AUHkeQ5nH9v_200x300.png"
+                        .into()
+                ),
+                season: 1,
+                number: 8,
+                time: "02:10".into(),
+                language: Some(Language::GermanSub),
                 online: true,
             }
         );
+        // The same episode once more, in another language.
+        assert_eq!(days[0].entries[1].language, Some(Language::EnglishSub));
         // Not out yet: the link names only the series.
+        let upcoming = &days[1].entries[0];
         assert_eq!(
-            (today[1].slug.as_str(), today[1].number, today[1].online),
-            ("hello-witch", 8, false)
+            (
+                upcoming.slug.as_str(),
+                upcoming.season,
+                upcoming.number,
+                upcoming.online
+            ),
+            ("blue-box", 2, 7, false)
         );
-        assert_eq!(today[1].language, Some(Language::EnglishSub));
+        assert_eq!(upcoming.language, Some(Language::GermanDub));
+        let film = &days[2].entries[0];
+        assert_eq!((film.season, film.number), (0, 22));
+    }
+
+    #[test]
+    fn episode_codes_name_season_and_episode() {
+        assert_eq!(episode_code("S02E07"), Some((2, 7)));
+        assert_eq!(episode_code("S32E155 "), Some((32, 155)));
+        assert_eq!(episode_code("Film 22"), Some((0, 22)));
+        assert_eq!(episode_code("Folge"), None);
     }
 
     #[test]

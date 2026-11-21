@@ -17,18 +17,12 @@
   margin-top: 28px;
 }
 
-/* Newest episodes: a scrolling list, about ten rows high. */
-.episodes {
-  max-height: 520px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
+/* Newest episodes: when, which episode, language, title. */
 .episode {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: 128px 72px auto minmax(0, 1fr);
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   padding: 11px 4px;
   border-bottom: 1px solid var(--line);
   transition: background var(--fast);
@@ -38,19 +32,18 @@
   background: var(--hover);
 }
 
-.episodeName {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  min-width: 0;
+.when {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .code {
-  flex: none;
-  min-width: 64px;
   color: var(--text-2);
   font-family: var(--font-mono);
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .episodeTitle {
@@ -60,12 +53,10 @@
   white-space: nowrap;
 }
 
-.when {
-  justify-self: end;
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  white-space: nowrap;
+.more {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
 }
 
 @media (max-width: 720px) {
@@ -74,12 +65,11 @@
   }
 
   .episode {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: 64px auto minmax(0, 1fr);
+    gap: 4px 12px;
   }
 
   .when {
     grid-column: 1 / -1;
-    justify-self: start;
-    margin-top: -8px;
   }
 }

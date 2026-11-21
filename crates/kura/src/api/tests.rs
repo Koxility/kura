@@ -659,17 +659,24 @@ async fn every_user_changes_their_own_account() {
 }
 
 #[tokio::test]
-async fn admins_upload_the_theme_song_and_everyone_plays_it() {
+async fn admins_manage_the_songs_and_everyone_lists_them() {
     let server = Server::start().await;
     let admin = server.log_in("/setup", "admin", "correct horse").await;
-    // In-memory servers have no data folder: no song.
-    assert_eq!(server.get("/status", &admin).await.1["music"], false);
-    assert_eq!(server.get("/theme/music", &admin).await.0, 404);
-    let upload = server
-        .request(Method::PUT, "/admin/theme/music", &admin)
-        .body(b"ID3fake".to_vec())
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(upload.status(), 400);
+    let user = json!({ "name": "sam", "password": "correct horse", "role": "user" });
+    server.call(Method::POST, "/users", &admin, user).await;
+    let sam = server.log_in("/login", "sam", "correct horse").await;
+
+    assert_eq!(server.get("/theme/songs", &sam).await, (200, json!([])));
+    assert_eq!(server.get("/theme/songs/abc", &sam).await.0, 404);
+    let upload = |cookie: &str| {
+        server
+            .request(Method::POST, "/admin/theme/songs?name=Song.mp3", cookie)
+            .body(b"ID3fake".to_vec())
+            .send()
+    };
+    assert_eq!(upload(&sam).await.unwrap().status(), 403);
+    // In-memory servers have no data folder to keep songs in.
+    assert_eq!(upload(&admin).await.unwrap().status(), 400);
+    let remove = server.call(Method::DELETE, "/admin/theme/songs/abc", &sam, Value::Null);
+    assert_eq!(remove.await.0, 403);
 }

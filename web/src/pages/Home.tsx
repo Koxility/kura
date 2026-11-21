@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
-import { type FormEvent, useEffect, useRef } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import {
   api,
@@ -11,7 +11,7 @@ import {
   siteNouns,
   statusQuery,
 } from "../api";
-import { LanguageBadge } from "../LanguageBadge";
+import { Flag } from "../Flag";
 import ui from "../ui.module.css";
 import styles from "./Home.module.css";
 import { SeriesGrid } from "./SeriesGrid";
@@ -184,8 +184,12 @@ export function Home() {
   );
 }
 
+/** Rows shown before "Show all". */
+const FIRST_EPISODES = 12;
+
 /** The site's newest episodes, for sites that list them (AniWorld). */
 function LatestEpisodes({ site }: { site: Site }) {
+  const [all, setAll] = useState(false);
   const episodes = useQuery({
     queryKey: ["new-episodes", site],
     queryFn: () => api<NewEpisode[]>(`/new-episodes/${site}`),
@@ -193,23 +197,29 @@ function LatestEpisodes({ site }: { site: Site }) {
   });
   // A site without such a list, or one that failed, leaves the section out.
   if (!episodes.data?.length) return null;
+  const shown = all ? episodes.data : episodes.data.slice(0, FIRST_EPISODES);
   return (
     <section>
       <h2 className={ui.section}>Latest Episodes</h2>
-      <ul className={`${ui.list} ${styles.episodes}`}>
-        {episodes.data.map((episode) => (
+      <ul className={ui.list}>
+        {shown.map((episode) => (
           <li key={`${episode.slug}/${episode.season}/${episode.number}/${episode.language}`}>
             <Link to={`/series/${episode.site}/${episode.slug}`} className={styles.episode}>
-              <span className={styles.episodeName}>
-                <span className={styles.code}>{releaseCode(episode)}</span>
-                <span className={styles.episodeTitle}>{episode.title}</span>
-              </span>
-              <LanguageBadge language={episode.language} />
               <span className={styles.when}>{episode.released}</span>
+              <span className={styles.code}>{releaseCode(episode)}</span>
+              <Flag language={episode.language} />
+              <span className={styles.episodeTitle}>{episode.title}</span>
             </Link>
           </li>
         ))}
       </ul>
+      {episodes.data.length > FIRST_EPISODES && (
+        <div className={styles.more}>
+          <button type="button" className={ui.ghost} onClick={() => setAll(!all)}>
+            {all ? "Show fewer" : `Show all ${episodes.data.length}`}
+          </button>
+        </div>
+      )}
     </section>
   );
 }

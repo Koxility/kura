@@ -1454,33 +1454,73 @@ async fn without_jellyfin_nothing_is_asked_and_bad_settings_are_refused() {
 }
 
 #[tokio::test]
-async fn the_theme_song_is_kept_in_the_data_folder() {
+async fn songs_are_kept_in_the_data_folder() {
     let s = setup(Vec::new(), 1);
-    assert!(!s.core.has_music());
+    // Without a data folder there are none and none can be added.
+    assert!(s.core.songs().unwrap().is_empty());
     assert!(matches!(
-        s.core.save_music(b"ID3x"),
+        s.core.add_song("a", b"ID3x"),
         Err(CoreError::Invalid(_))
     ));
-    s.core.set_data_dir(s.path("data"));
-    assert!(s.core.music().unwrap().is_none());
+
+    // The one song of Kura 1.3.0 joins the list.
+    let data = s.path("data");
+    std::fs::create_dir_all(data.join("theme")).unwrap();
+    std::fs::write(data.join("theme/music.mp3"), b"ID3 old").unwrap();
+    s.core.set_data_dir(data.clone());
+    let songs = s.core.songs().unwrap();
+    assert_eq!(songs.len(), 1);
+    assert_eq!(songs[0].name, "Wii Shop Channel Main Theme");
+    assert!(!data.join("theme/music.mp3").exists());
+    assert_eq!(
+        s.core.song(&songs[0].id).unwrap().unwrap().bytes,
+        b"ID3 old"
+    );
+
     assert!(matches!(
-        s.core.save_music(b"<html>"),
+        s.core.add_song("x", b"<html>"),
         Err(CoreError::Invalid(_))
     ));
     let too_big = vec![0xFF; MOST_MUSIC_BYTES + 1];
     assert!(matches!(
-        s.core.save_music(&too_big),
+        s.core.add_song("x", &too_big),
         Err(CoreError::Invalid(_))
     ));
+    let second = s.core.add_song("Shop_Theme.mp3", b"ID3 second").unwrap();
+    assert_eq!(second.name, "Shop Theme");
+    let names: Vec<_> = s
+        .core
+        .songs()
+        .unwrap()
+        .into_iter()
+        .map(|song| song.name)
+        .collect();
+    assert_eq!(names, ["Wii Shop Channel Main Theme", "Shop Theme"]);
+    // Only listed ids name a file.
+    assert!(s.core.song("../kura.db").unwrap().is_none());
 
-    s.core.save_music(b"ID3 first").unwrap();
-    assert!(s.core.has_music());
-    let first = s.core.music().unwrap().unwrap();
-    assert_eq!(first.bytes, b"ID3 first");
-    s.core.save_music(b"ID3 the second").unwrap();
-    let second = s.core.music().unwrap().unwrap();
-    assert_ne!(first.etag, second.etag);
-    s.core.remove_music().unwrap();
-    s.core.remove_music().unwrap();
-    assert!(!s.core.has_music());
+    assert!(s.core.remove_song(&songs[0].id).unwrap());
+    assert!(!s.core.remove_song(&songs[0].id).unwrap());
+    assert!(s.core.song(&songs[0].id).unwrap().is_none());
+    assert_eq!(s.core.songs().unwrap(), [second]);
+}
+
+#[tokio::test]
+async fn a_theme_picks_from_its_own_list_and_known_songs() {
+    let s = setup(Vec::new(), 1);
+    let user = s.core.store.users().unwrap().remove(0);
+    let mut theme = kura_domain::Theme::default();
+    theme.ascii_library.push("aurora".into());
+    theme.ascii_piece = "aurora".into();
+    s.core.set_theme(&user, &theme).unwrap();
+
+    let bad = |change: fn(&mut kura_domain::Theme)| {
+        let mut theme = kura_domain::Theme::default();
+        change(&mut theme);
+        matches!(s.core.set_theme(&user, &theme), Err(CoreError::Invalid(_)))
+    };
+    assert!(bad(|theme| theme.ascii_piece = "donut".into()));
+    assert!(bad(|theme| theme.ascii_library.push("../x".into())));
+    assert!(bad(|theme| theme.volume = 101));
+    assert!(bad(|theme| theme.song = Some("missing".into())));
 }

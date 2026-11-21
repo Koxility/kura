@@ -1,48 +1,54 @@
 import { useQuery } from "@tanstack/react-query";
-import { mount, type Piece } from "ascii.rest";
+import { load, mount, names, type Piece, type PieceName } from "ascii.rest";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import { accountQuery } from "./api";
+import { accountQuery, songsQuery } from "./api";
 import styles from "./ThemeEffects.module.css";
 
-/**
- * The scenes the background offers. Each loads on its own when picked, so the app carries
- * these few and not all of ascii.rest's pieces.
- */
-export const asciiScenes = {
-  "misty-forest": { name: "Misty forest", load: () => import("ascii.rest/pieces/misty-forest") },
-  "tokyo-rain": { name: "Tokyo rain", load: () => import("ascii.rest/pieces/tokyo-rain") },
-  "night-coast": { name: "Night coast", load: () => import("ascii.rest/pieces/night-coast") },
-  "kyoto-dusk": { name: "Kyoto dusk", load: () => import("ascii.rest/pieces/kyoto-dusk") },
-  "lantern-lake": { name: "Lantern lake", load: () => import("ascii.rest/pieces/lantern-lake") },
-  "ocean-sunset": { name: "Ocean sunset", load: () => import("ascii.rest/pieces/ocean-sunset") },
-  "aurora-fjord": { name: "Aurora fjord", load: () => import("ascii.rest/pieces/aurora-fjord") },
-  snowfall: { name: "Snowfall", load: () => import("ascii.rest/pieces/snowfall") },
-} satisfies Record<string, { name: string; load: () => Promise<unknown> }>;
+/** Whether ascii.rest has a piece of this name; every piece ships with Kura, each loaded
+ *  only when it is shown. */
+export const isPieceName = (name: string): name is PieceName =>
+  (names as readonly string[]).includes(name);
 
-export type AsciiScene = keyof typeof asciiScenes;
+/** The piece name in an ascii.rest link (`https://ascii.rest/aurora-fjord/`), or a bare
+ *  name. `null` when it names no piece. */
+export function pieceFromLink(text: string): PieceName | null {
+  const trimmed = text.trim().toLowerCase();
+  const path = trimmed.replace(/^https?:\/\//, "").replace(/^(www\.)?ascii\.rest/, "");
+  const name = path.replace(/^[/#]+/, "").split(/[/?#]/)[0];
+  return isPieceName(name) ? name : null;
+}
+
+/** "aurora-fjord" as "Aurora fjord". */
+export const pieceTitle = (name: string) => {
+  const words = name.replaceAll("-", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
 
 /** The user's theme: the looping song and the ASCII background. */
-export function ThemeEffects({ music }: { music: boolean }) {
+export function ThemeEffects() {
   const account = useQuery(accountQuery);
+  const songs = useQuery(songsQuery);
   const theme = account.data?.theme;
+  const list = songs.data ?? [];
+  const song = list.find((known) => known.id === theme?.song) ?? list[0];
   return (
     <>
-      {theme?.music && music && <Music />}
-      {theme?.ascii && <Background scene={theme.ascii_piece} />}
+      {theme?.music && song && <Music id={song.id} volume={theme.volume} />}
+      {theme?.ascii && <Background piece={theme.ascii_piece} />}
     </>
   );
 }
 
 /**
- * Plays the theme song on a loop while mounted. Browsers refuse sound before the person has
- * clicked or typed on the page, so a refused start waits for the first click or key.
+ * Plays a song on a loop while mounted. Browsers refuse sound before the person has clicked
+ * or typed on the page, so a refused start waits for the first click or key. The volume
+ * changes without starting the song again.
  */
-function Music() {
+function Music({ id, volume }: { id: string; volume: number }) {
   const audio = useRef<HTMLAudioElement | null>(null);
   useEffect(() => {
-    const song = new Audio("/api/v1/theme/music");
+    const song = new Audio(`/api/v1/theme/songs/${encodeURIComponent(id)}`);
     song.loop = true;
-    song.volume = 0.5;
     audio.current = song;
     const events = ["pointerdown", "keydown"] as const;
     const start = () => {
@@ -59,37 +65,45 @@ function Music() {
       song.load();
       audio.current = null;
     };
-  }, []);
+  }, [id]);
+  useEffect(() => {
+    if (audio.current) audio.current.volume = Math.min(1, Math.max(0, volume / 100));
+  }, [volume, id]);
   return null;
 }
 
-/** A faint animated scene behind the pages, in the text colour, fading out at the edges. */
-function Background({ scene }: { scene: string }) {
+/** A faint animated scene behind the pages. Coloured pieces keep their colours, washed out;
+ *  plain ones are drawn in the faintest text colour. */
+function Background({ piece: name }: { piece: string }) {
   const [piece, setPiece] = useState<Piece | null>(null);
-  const art = useRef<HTMLPreElement>(null);
+  const art = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    const known = asciiScenes[scene as AsciiScene] ?? asciiScenes["misty-forest"];
+    if (!isPieceName(name)) return;
     let live = true;
-    known.load().then((module) => live && setPiece(module as unknown as Piece));
+    setPiece(null);
+    load[name]().then((module) => live && setPiece(module as unknown as Piece));
     return () => {
       live = false;
     };
-  }, [scene]);
-  // Drawn into a <pre> as text in one ink. The library's React component would bring every
-  // one of its pieces into the build; mounting directly keeps only the scenes above.
+  }, [name]);
+  const coloured = Boolean(piece?.meta.palette);
   useEffect(() => {
     if (!piece || !art.current) return;
     return mount(art.current, piece);
-  }, [piece]);
+  }, [piece, coloured]);
   if (!piece) return null;
   const { cols, rows } = piece.meta;
   return (
     <div
-      className={styles.background}
+      className={coloured ? `${styles.background} ${styles.coloured}` : styles.background}
       aria-hidden="true"
       style={{ "--cols": cols, "--rows": rows } as CSSProperties}
     >
-      <pre ref={art} className={styles.art} />
+      {coloured ? (
+        <canvas ref={(element) => { art.current = element; }} className={styles.canvas} />
+      ) : (
+        <pre ref={(element) => { art.current = element; }} className={styles.art} />
+      )}
     </div>
   );
 }

@@ -194,6 +194,8 @@ pub struct Core {
     pending_scan: Mutex<jellyfin::Pending>,
     /// The folder of the database, which also holds the theme song.
     data_dir: Mutex<Option<PathBuf>>,
+    /// One change to the song list at a time.
+    songs_lock: Mutex<()>,
 }
 
 /// When a site's full list was fetched, and the list.
@@ -246,6 +248,7 @@ impl Core {
             logins: Mutex::default(),
             pending_scan: Mutex::default(),
             data_dir: Mutex::default(),
+            songs_lock: Mutex::default(),
         })
     }
 

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ChangeEvent, type FormEvent, useState } from "react";
+import { type ChangeEvent, type FormEvent, useRef, useState } from "react";
 import { NavLink, useParams } from "react-router";
 import {
   type Account,
@@ -18,11 +18,11 @@ import {
   siteNames,
   sites,
   supportedHosters,
-  statusQuery,
+  songsQuery,
   type Theme,
   type User,
 } from "../api";
-import { type AsciiScene, asciiScenes } from "../ThemeEffects";
+import { pieceFromLink, pieceTitle } from "../ThemeEffects";
 import ui from "../ui.module.css";
 import styles from "./Settings.module.css";
 
@@ -977,11 +977,11 @@ function Outcome({
   );
 }
 
-/** Music and background, per user. Admins also upload the song here. */
+/** Music and background, per account. Admins also manage the songs here. */
 function ThemeSection({ admin }: { admin: boolean }) {
   const client = useQueryClient();
   const account = useQuery(accountQuery);
-  const status = useQuery(statusQuery);
+  const songs = useQuery(songsQuery);
   const save = useMutation({
     mutationFn: (theme: Theme) => api<Account>("/account/theme", "PUT", theme),
     // Shown at once; the server's answer replaces it.
@@ -996,55 +996,64 @@ function ThemeSection({ admin }: { admin: boolean }) {
   const theme = account.data?.theme;
   if (!theme) return null;
   const set = (part: Partial<Theme>) => save.mutate({ ...theme, ...part });
-  const hasSong = status.data?.music ?? false;
+  /** Applies at once, without asking the server, e.g. while the volume slider moves. */
+  const preview = (part: Partial<Theme>) => {
+    if (account.data)
+      client.setQueryData(accountQuery.queryKey, { ...account.data, theme: { ...theme, ...part } });
+  };
+  const list = songs.data ?? [];
+  const current = list.find((song) => song.id === theme.song) ?? list[0];
 
   return (
     <section className={styles.form}>
-      <label className={`${ui.check} ${styles.toggle}`}>
+      <h3 className={`${ui.section} ${styles.left}`}>Background music</h3>
+      <label className={ui.check}>
         <input
           type="checkbox"
           checked={theme.music}
           onChange={(event) => set({ music: event.target.checked })}
         />
-        Wii Shop Channel Main Theme
+        Play music
       </label>
       <p className={styles.hint}>
         Plays on a loop while Kura is open. Browsers start sound only after the first click or key
         on the page.
-        {!hasSong && !admin && " An admin has not added the song yet."}
+        {list.length === 0 && !admin && " An admin has not added any songs yet."}
       </p>
-      {admin && <SongUpload hasSong={hasSong} />}
+      <div className={styles.musicFields}>
+        <label className={ui.field}>
+          Song
+          <select
+            className={ui.input}
+            value={current?.id ?? ""}
+            disabled={list.length === 0}
+            onChange={(event) => set({ song: event.target.value })}
+          >
+            {list.length === 0 && <option value="">No songs yet</option>}
+            {list.map((song) => (
+              <option key={song.id} value={song.id}>
+                {song.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Volume value={theme.volume} onPreview={(volume) => preview({ volume })} onSave={(volume) => set({ volume })} />
+      </div>
+      {admin && <Songs />}
 
-      <label className={`${ui.check} ${styles.toggle}`}>
+      <h3 className={`${ui.section} ${styles.left}`}>ASCII background</h3>
+      <label className={ui.check}>
         <input
           type="checkbox"
           checked={theme.ascii}
           onChange={(event) => set({ ascii: event.target.checked })}
         />
-        ASCII background
+        Show a background
       </label>
       <p className={styles.hint}>
-        A faint animated scene behind the pages, from{" "}
-        <a className={styles.link} href="https://ascii.rest/#pieces" target="_blank" rel="noreferrer">
-          ascii.rest
-        </a>
-        .
+        A faint animated scene behind the pages. Pieces with colour keep it, washed out.
       </p>
-      <label className={`${ui.field} ${styles.top}`}>
-        Scene
-        <select
-          className={ui.input}
-          value={theme.ascii_piece}
-          disabled={!theme.ascii}
-          onChange={(event) => set({ ascii_piece: event.target.value })}
-        >
-          {(Object.keys(asciiScenes) as AsciiScene[]).map((id) => (
-            <option key={id} value={id}>
-              {asciiScenes[id].name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <AsciiLibrary theme={theme} onChange={set} />
       {save.isError && (
         <p className={ui.error} role="alert">
           {save.error.message}
@@ -1054,14 +1063,145 @@ function ThemeSection({ admin }: { admin: boolean }) {
   );
 }
 
-/** The song lives on this server only; Kura ships none of its own. */
-function SongUpload({ hasSong }: { hasSong: boolean }) {
+/** The volume slider. It keeps its own value, so it moves at once; the music follows while
+ *  it moves, and the value is saved when it is let go. */
+function Volume({
+  value,
+  onPreview,
+  onSave,
+}: {
+  value: number;
+  onPreview: (volume: number) => void;
+  onSave: (volume: number) => void;
+}) {
+  const [shown, setShown] = useState(value);
+  // The preview changes `value` too, so what was last saved is kept apart.
+  const saved = useRef(value);
+  const commit = () => {
+    if (shown !== saved.current) {
+      saved.current = shown;
+      onSave(shown);
+    }
+  };
+  return (
+    <label className={ui.field}>
+      <span>
+        Volume <span className={styles.faint}>{shown} %</span>
+      </span>
+      <input
+        className={styles.range}
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={shown}
+        onChange={(event) => {
+          setShown(event.target.valueAsNumber);
+          onPreview(event.target.valueAsNumber);
+        }}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={commit}
+      />
+    </label>
+  );
+}
+
+/** The account's own list of ascii.rest pieces: pick one, remove one, add one by link. */
+function AsciiLibrary({ theme, onChange }: { theme: Theme; onChange: (part: Partial<Theme>) => void }) {
+  const [link, setLink] = useState("");
+  const [problem, setProblem] = useState("");
+
+  function add(event: FormEvent) {
+    event.preventDefault();
+    const name = pieceFromLink(link);
+    if (!name) {
+      const asked = link.trim().replace(/^https?:\/\/(www\.)?ascii\.rest\/?/, "").replace(/\/$/, "");
+      setProblem(`ascii.rest has no piece called “${asked || link.trim()}”.`);
+      return;
+    }
+    setProblem("");
+    setLink("");
+    const library = theme.ascii_library.includes(name) ? theme.ascii_library : [...theme.ascii_library, name];
+    onChange({ ascii_library: library, ascii_piece: name, ascii: true });
+  }
+
+  return (
+    <>
+      <ul className={`${ui.list} ${styles.top}`} aria-label="Your backgrounds">
+        {theme.ascii_library.map((name) => (
+          <li key={name} className={`${ui.row} ${styles.entry}`}>
+            <label className={`${ui.check} ${ui.grow}`}>
+              <input
+                type="radio"
+                name="ascii-piece"
+                checked={theme.ascii_piece === name}
+                onChange={() => onChange({ ascii_piece: name })}
+              />
+              {pieceTitle(name)}
+            </label>
+            <a
+              className={`${ui.muted} ${styles.link}`}
+              href={`https://ascii.rest/${name}/`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              ascii.rest
+            </a>
+            <button
+              type="button"
+              className={ui.ghost}
+              // The one in use stays, so there is always one to show.
+              disabled={theme.ascii_piece === name}
+              title={theme.ascii_piece === name ? "Pick another one first" : undefined}
+              onClick={() =>
+                onChange({ ascii_library: theme.ascii_library.filter((other) => other !== name) })
+              }
+            >
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
+      <form className={styles.oneLine} onSubmit={add}>
+        <label className={ui.field}>
+          Add from ascii.rest
+          <input
+            className={ui.input}
+            value={link}
+            onChange={(event) => setLink(event.target.value)}
+            placeholder="https://ascii.rest/aurora-fjord/"
+            required
+          />
+        </label>
+        <button className={ui.button}>Add</button>
+        {problem && (
+          <span className={ui.error} role="alert">
+            {problem}
+          </span>
+        )}
+      </form>
+      <p className={styles.hint}>
+        Paste the link of any piece from{" "}
+        <a className={styles.link} href="https://ascii.rest/#pieces" target="_blank" rel="noreferrer">
+          ascii.rest
+        </a>
+        . Kura carries all of them, so nothing is loaded from there.
+      </p>
+    </>
+  );
+}
+
+/** The songs every account picks from; they live on this server only. */
+function Songs() {
   const client = useQueryClient();
-  const refresh = () => client.invalidateQueries({ queryKey: ["status"] });
+  const songs = useQuery(songsQuery);
+  const refresh = () => client.invalidateQueries({ queryKey: songsQuery.queryKey });
   const upload = useMutation({
     mutationFn: async (file: File) => {
-      const response = await fetch("/api/v1/admin/theme/music", {
-        method: "PUT",
+      const name = encodeURIComponent(file.name);
+      const response = await fetch(`/api/v1/admin/theme/songs?name=${name}`, {
+        method: "POST",
         headers: { "Content-Type": "audio/mpeg" },
         body: file,
       });
@@ -1073,21 +1213,44 @@ function SongUpload({ hasSong }: { hasSong: boolean }) {
     onSuccess: refresh,
   });
   const remove = useMutation({
-    mutationFn: () => api("/admin/theme/music", "DELETE"),
-    onSuccess: refresh,
+    mutationFn: (id: string) => api(`/admin/theme/songs/${encodeURIComponent(id)}`, "DELETE"),
+    onSuccess: () => {
+      refresh();
+      // An account that picked it falls back to the first song.
+      client.invalidateQueries({ queryKey: accountQuery.queryKey });
+    },
   });
   const failure = upload.error ?? remove.error;
 
   return (
     <div className={styles.song}>
+      <h4 className={styles.subheading}>Songs</h4>
       <p className={styles.hint}>
-        {hasSong
-          ? "A song is uploaded. It stays on this server."
-          : "Kura ships without the song. Upload an MP3 of it (at most 20 MB); it stays on this server."}
+        Kura ships without songs. Upload MP3s (at most 20 MB each); they stay on this server and
+        every account picks from them.
       </p>
+      {songs.data && songs.data.length > 0 && (
+        <ul className={ui.list}>
+          {songs.data.map((song) => (
+            <li key={song.id} className={`${ui.row} ${styles.entry}`}>
+              <span className={ui.grow}>{song.name}</span>
+              <button
+                type="button"
+                className={ui.ghost}
+                disabled={remove.isPending}
+                onClick={() => {
+                  if (confirm(`Remove “${song.name}”?`)) remove.mutate(song.id);
+                }}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className={`${ui.actions} ${styles.left}`}>
         <label className={ui.button}>
-          {upload.isPending ? "Uploading…" : hasSong ? "Replace song" : "Upload song"}
+          {upload.isPending ? "Uploading…" : "Add song"}
           <input
             type="file"
             accept="audio/mpeg,.mp3"
@@ -1100,16 +1263,6 @@ function SongUpload({ hasSong }: { hasSong: boolean }) {
             }}
           />
         </label>
-        {hasSong && (
-          <button
-            type="button"
-            className={ui.ghost}
-            disabled={remove.isPending}
-            onClick={() => remove.mutate()}
-          >
-            Remove
-          </button>
-        )}
       </div>
       {failure && (
         <p className={ui.error} role="alert">

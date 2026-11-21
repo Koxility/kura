@@ -14,6 +14,12 @@
   mask-image: radial-gradient(ellipse at center, #000 30%, transparent 78%);
 }
 
+/* Colour shows, but muted, so the pages stay in front. */
+.coloured {
+  opacity: 0.14;
+  filter: saturate(0.55);
+}
+
 /* The scene covers the window: whichever of width or height needs the larger letters. */
 .art {
   margin: 0;
@@ -21,4 +27,10 @@
   font-size: max(calc(100vw / (var(--cols) * 0.6)), calc(100vh / var(--rows)));
   line-height: 1;
   white-space: pre;
+}
+
+.canvas {
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
 }

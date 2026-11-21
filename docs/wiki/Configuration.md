@@ -91,8 +91,8 @@ Every account has **Your account**: change the name, the password (the current o
 
 Per account:
 
-- **Wii Shop Channel Main Theme** (on by default): plays on a loop while Kura is open. Kura ships without the song; an admin uploads an MP3 here (at most 20 MB), which stays in the data folder. Browsers start sound only after the first click or key on the page.
-- **ASCII background** (off by default): a faint animated scene from [ascii.rest](https://ascii.rest) behind the pages. Pick the scene below it.
+- **Background music** (on by default): plays the chosen **Song** on a loop at the chosen **Volume** while Kura is open. Kura ships without songs; admins add MP3s here (at most 20 MB each, named after the file), which stay in the data folder, and every account picks from them. Browsers start sound only after the first click or key on the page.
+- **ASCII background** (off by default): a faint animated scene from [ascii.rest](https://ascii.rest) behind the pages, picked from your own list. Paste the link of any piece (e.g. `https://ascii.rest/aurora-fjord/`) to add it; pieces with colour keep it, washed out. Every piece ships with Kura, so nothing is loaded from ascii.rest.
 
 ## Settings → Users (admins)
 

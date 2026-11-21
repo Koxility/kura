@@ -69,14 +69,14 @@ fn router(core: Arc<Core>) -> Router {
         .route("/account/theme", put(set_theme))
         .route("/account/keys", get(api_keys).post(create_api_key))
         .route("/account/keys/{id}", delete(delete_api_key))
-        .route("/theme/music", get(music))
+        .route("/theme/songs", get(songs))
+        .route("/theme/songs/{id}", get(song))
         .route(
-            "/admin/theme/music",
-            put(save_music)
-                .delete(remove_music)
-                // Some room above the limit, so a song just over it gets the clear error.
-                .layer(DefaultBodyLimit::max(kura_core::MOST_MUSIC_BYTES + 1024)),
+            "/admin/theme/songs",
+            // Some room above the limit, so a song just over it gets the clear error.
+            post(add_song).layer(DefaultBodyLimit::max(kura_core::MOST_MUSIC_BYTES + 1024)),
         )
+        .route("/admin/theme/songs/{id}", delete(remove_song))
         .route("/search", get(search))
         .route("/popular/{site}", get(popular))
         .route("/new/{site}", get(latest))
@@ -257,7 +257,6 @@ async fn status(State(core): App, headers: HeaderMap) -> ApiResult<Json<Value>> 
         "user": user,
         "version": env!("CARGO_PKG_VERSION"),
         "commit": env!("KURA_COMMIT"),
-        "music": core.has_music(),
         "repository": format!("https://github.com/{REPOSITORY}"),
         "latest_version": core.newer_release(),
         "needs_library": core.settings()?.libraries.is_empty(),
@@ -438,11 +437,20 @@ async fn delete_api_key(
     }
 }
 
-/// The theme song. Kept by the browser and checked with its tag, so a page load does not
-/// fetch megabytes again.
-async fn music(State(core): App, _: Session, headers: HeaderMap) -> ApiResult<Response> {
-    let music = core.music()?;
-    let music = music.ok_or_else(|| error(StatusCode::NOT_FOUND, "no theme song uploaded"))?;
+async fn songs(State(core): App, _: Session) -> ApiResult<Json<Vec<kura_domain::Song>>> {
+    Ok(Json(core.songs()?))
+}
+
+/// One song. Kept by the browser and checked with its tag, so a page load does not fetch
+/// megabytes again.
+async fn song(
+    State(core): App,
+    _: Session,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    let music = core.song(&id)?;
+    let music = music.ok_or_else(|| error(StatusCode::NOT_FOUND, "no such song"))?;
     let cache = [
         (CACHE_CONTROL, "private, no-cache".to_owned()),
         (ETAG, music.etag.clone()),
@@ -462,14 +470,28 @@ async fn music(State(core): App, _: Session, headers: HeaderMap) -> ApiResult<Re
         .into_response())
 }
 
-async fn save_music(State(core): App, _: Admin, body: Bytes) -> ApiResult<StatusCode> {
-    core.save_music(&body)?;
-    Ok(StatusCode::NO_CONTENT)
+#[derive(Deserialize)]
+struct SongName {
+    #[serde(default)]
+    name: String,
 }
 
-async fn remove_music(State(core): App, _: Admin) -> ApiResult<StatusCode> {
-    core.remove_music()?;
-    Ok(StatusCode::NO_CONTENT)
+/// The MP3 is the body; its name comes in the query, taken from the file name.
+async fn add_song(
+    State(core): App,
+    _: Admin,
+    Query(form): Query<SongName>,
+    body: Bytes,
+) -> ApiResult<Json<kura_domain::Song>> {
+    Ok(Json(core.add_song(&form.name, &body)?))
+}
+
+async fn remove_song(State(core): App, _: Admin, Path(id): Path<String>) -> ApiResult<StatusCode> {
+    if core.remove_song(&id)? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(error(StatusCode::NOT_FOUND, "no such song"))
+    }
 }
 
 #[derive(Deserialize)]

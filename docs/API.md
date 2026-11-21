@@ -28,7 +28,7 @@ Sites are `aniworld` or `serienstream`; languages are `german_dub`, `german_sub`
 | `GET /search?q=…&site=…` | user | Titles matching the text, on one site or all |
 | `GET /new/{site}` · `GET /popular/{site}` | user | Title lists |
 | `GET /new-episodes/{site}` | user | Newest episodes (AniWorld; empty elsewhere): `slug`, `title`, `season` (0 = films), `number`, `language`, `released` as the site shows it |
-| `GET /calendar/{site}` | user | Days around today (AniWorld; empty elsewhere): `date`, `offset` (0 = today), `entries` with `time`, `title`, `season`, `number`, `language`, `online` |
+| `GET /calendar/{site}` | user | Today and the next six days (AniWorld; empty elsewhere): `weekday` (1 = Monday), `date`, `today`, `entries` with `title`, `cover_url`, `season` (0 = films), `number`, `time`, `language`, `online` |
 | `GET /series/{site}/{slug}` | user | Title, description, `seasons`, `imdb_id` |
 | `GET /series/{site}/{slug}/seasons/{n}` | user | Episodes of a season with the `languages` each is offered in |
 | `GET /series/{site}/{slug}/downloaded?title=…&imdb=…` | user | `[season, episode]` pairs already in a library |
@@ -36,5 +36,7 @@ Sites are `aniworld` or `serienstream`; languages are `german_dub`, `german_sub`
 | `POST /queue` | admin | Queue: `{ site, slug, all \| seasons \| episodes, language?, hoster?, library?, imdb_id? }`; answers `{ queued }` |
 | `GET /requests` · `POST /requests` | user | Own requests; a user asks with the same body as `POST /queue` |
 | `GET /events` | user | Server-sent events: `queue_changed`, `requests_changed`, `progress` |
+| `GET /theme/songs` · `GET /theme/songs/{id}` | user | The background songs, and one song's MP3 |
+| `POST /admin/theme/songs?name=…` · `DELETE /admin/theme/songs/{id}` | admin | Add a song (the MP3 as the body), remove one |
 
 To find the Kura title for a Jellyfin series, search by its name and compare `imdb_id` from the title page with the series' IMDb ID; Kura also puts `[imdbid-tt…]` into every series folder it creates.
