@@ -4,6 +4,7 @@ import { NavLink, useParams } from "react-router";
 import {
   api,
   hosterNames,
+  type Jellyfin as JellyfinSettings,
   type Language,
   type Library,
   languageNames,
@@ -24,6 +25,7 @@ const sections = [
   { id: "library", title: "Library" },
   { id: "sites", title: "Sites" },
   { id: "auto-sync", title: "Auto-Sync" },
+  { id: "jellyfin", title: "Jellyfin" },
   { id: "users", title: "Users", admin: true },
   { id: "administration", title: "Administration", admin: true },
 ];
@@ -114,6 +116,7 @@ function SettingsForm({
         {section === "library" && <Libraries draft={draft} change={change} />}
         {section === "sites" && <Sites draft={draft} change={change} />}
         {section === "auto-sync" && <AutoSync draft={draft} change={change} />}
+        {section === "jellyfin" && <Jellyfin draft={draft} change={change} />}
         {section === "administration" && (
           <Administration settings={initial} onImport={(imported) => save.mutate(imported)} />
         )}
@@ -307,6 +310,17 @@ function Libraries({ draft, change }: SectionProps) {
               required
             />
           </label>
+          <label className={ui.field}>
+            Path in Jellyfin
+            <input
+              className={ui.input}
+              value={library.jellyfin_path ?? ""}
+              onChange={(event) =>
+                update(index, { jellyfin_path: event.target.value.trim() || null })
+              }
+              placeholder="Same as the path"
+            />
+          </label>
           <div className={ui.field} role="group" aria-label={`Default library for`}>
             Default for
             <div className={styles.inline}>
@@ -440,6 +454,64 @@ function AutoSync({ draft, change }: SectionProps) {
           />
         </label>
       </fieldset>
+    </>
+  );
+}
+
+function Jellyfin({ draft, change }: SectionProps) {
+  const jellyfin = draft.jellyfin;
+  const set = (part: Partial<JellyfinSettings>) => change({ jellyfin: { ...jellyfin, ...part } });
+  const test = useMutation({
+    mutationFn: () => api<{ server: string }>("/admin/jellyfin/test", "POST", jellyfin),
+  });
+
+  return (
+    <>
+      <p className={styles.hint}>
+        When the queue is empty, Kura asks Jellyfin to scan the series folders that got new
+        episodes, and only those, never the whole library. Failed downloads stay in the queue and
+        do not hold the scan back. Leave the address empty to switch this off. If Jellyfin sees a
+        library under another path, enter it as "Path in Jellyfin" in the Library section.
+      </p>
+      <label className={ui.field}>
+        Address
+        <input
+          className={ui.input}
+          type="url"
+          value={jellyfin.url}
+          onChange={(event) => set({ url: event.target.value })}
+          placeholder="http://192.168.1.10:8096"
+        />
+      </label>
+      <label className={ui.field}>
+        API key
+        <input
+          className={ui.input}
+          type="password"
+          autoComplete="off"
+          value={jellyfin.api_key}
+          onChange={(event) => set({ api_key: event.target.value })}
+          placeholder="From Jellyfin: Dashboard, API Keys"
+        />
+      </label>
+      <div className={`${ui.actions} ${styles.left}`}>
+        <button
+          type="button"
+          className={ui.button}
+          disabled={test.isPending || !jellyfin.url.trim()}
+          onClick={() => test.mutate()}
+        >
+          Test connection
+        </button>
+        <span className={ui.muted} role="status">
+          {test.isPending ? "Asking…" : test.isSuccess && `Connected to ${test.data.server}.`}
+        </span>
+      </div>
+      {test.isError && (
+        <p className={ui.error} role="alert">
+          {test.error.message}
+        </p>
+      )}
     </>
   );
 }

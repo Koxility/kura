@@ -369,6 +369,7 @@ fn users_see_jobs_without_server_paths() {
         hidden: false,
         queued_at: 0,
         imdb_id: None,
+        started_at: None,
     };
     let mut libraries = vec!["/media".to_owned(), "/media/anime".to_owned()];
 

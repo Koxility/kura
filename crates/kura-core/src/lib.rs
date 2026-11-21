@@ -4,6 +4,7 @@
 
 mod auth;
 mod downloaded;
+mod jellyfin;
 mod library;
 mod naming;
 mod net;
@@ -63,6 +64,9 @@ pub enum CoreError {
     /// A library folder that does not exist and cannot be created.
     #[error("the folder {0} cannot be created: {1}")]
     Folder(String, std::io::Error),
+    /// Jellyfin did not answer or refused; the text is shown to the admin.
+    #[error("{0}")]
+    Jellyfin(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
@@ -183,6 +187,8 @@ pub struct Core {
     found: Mutex<downloaded::FoundTitles>,
     /// Wrong logins per address and name, so passwords cannot be guessed at speed.
     logins: Mutex<auth::LoginTries>,
+    /// Series folders Jellyfin is asked to scan once the queue is empty.
+    pending_scan: Mutex<jellyfin::Pending>,
 }
 
 /// When a site's full list was fetched, and the list.
@@ -233,6 +239,7 @@ impl Core {
             scan: Mutex::default(),
             found: Mutex::default(),
             logins: Mutex::default(),
+            pending_scan: Mutex::default(),
         })
     }
 
@@ -439,7 +446,8 @@ impl Core {
     }
 
     /// Queues episodes and returns how many were new. Episodes that are already queued,
-    /// running or done are skipped.
+    /// running or downloaded are skipped; a finished download whose file is gone is queued
+    /// again.
     pub async fn enqueue(
         &self,
         site: SiteId,
@@ -472,6 +480,22 @@ impl Core {
             return Err(CoreError::Invalid("nothing was selected"));
         }
 
+        // The queue and the libraries as they are now: a finished download whose file was
+        // deleted since, and that is not in a library folder either, is downloaded again
+        // instead of being skipped as done.
+        self.forget_scan();
+        let present = self.downloaded_episodes(site, slug, &series.summary.title, Some(imdb_id))?;
+        let jobs = self.store.jobs()?;
+        let gone = |season: u32, number: u32| {
+            jobs.iter().any(|job| {
+                job.state == JobState::Done
+                    && job.episode.site == site
+                    && job.episode.slug == slug
+                    && (job.episode.season, job.episode.number) == (season, number)
+                    && !downloaded::on_disk(job)
+            }) && !present.contains(&(season, number))
+        };
+
         let mut queued = 0;
         for (season, number) in episodes {
             let episode = EpisodeId {
@@ -489,6 +513,7 @@ impl Core {
                 dir: &dir,
                 imdb_id: Some(imdb_id),
                 now: auth::now(),
+                replace_done: gone(season, number),
             };
             // An episode picked twice, alone and with its season, is queued once.
             queued += usize::from(self.store.enqueue(&new)?.is_some());
@@ -512,6 +537,7 @@ impl Core {
             dir: &job.dir,
             imdb_id: job.imdb_id.as_deref(),
             now: auth::now(),
+            replace_done: false,
         })?;
         self.changed();
         Ok(queued.is_some())
@@ -576,6 +602,11 @@ impl Core {
                 };
                 self.start(job);
             }
+            // Nothing queued and nothing running: the batch is through, also when some of it
+            // failed, so Jellyfin scans what arrived, once.
+            if self.running().is_empty() {
+                self.queue_drained();
+            }
             self.wake.notified().await;
         }
     }
@@ -590,6 +621,7 @@ impl Core {
                 Ok((path, language)) => {
                     // The new file should show as downloaded at once.
                     core.forget_scan();
+                    core.note_new_file(&path);
                     core.store.finish(id, &path.to_string_lossy(), language)
                 }
                 Err(reason) => core.store.fail(id, &reason),
@@ -808,6 +840,9 @@ fn check_settings(settings: &Settings) -> Result<()> {
     }
     if let Some(template) = &settings.naming_template {
         naming::check_template(template)?;
+    }
+    if settings.jellyfin.enabled() {
+        jellyfin::check(&settings.jellyfin)?;
     }
 
     let mut names = Vec::new();

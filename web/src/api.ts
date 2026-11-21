@@ -61,6 +61,14 @@ export interface Library {
   name: string;
   path: string;
   default_for: Site[];
+  /** The same folder as Jellyfin sees it; absent or null when it is the same path. */
+  jellyfin_path?: string | null;
+}
+
+/** Off while `url` is empty. */
+export interface Jellyfin {
+  url: string;
+  api_key: string;
 }
 
 export type Schedule = { kind: "every"; minutes: number } | { kind: "daily"; at: string };
@@ -91,6 +99,7 @@ export interface Settings {
     /** Taken off the tracked list until a later download; `at` in Unix seconds. */
     removed: (TitleRef & { at: number })[];
   };
+  jellyfin: Jellyfin;
 }
 
 export interface Status {

@@ -31,7 +31,7 @@ pub struct SyncStatus {
     pub titles: Vec<TrackedTitle>,
 }
 
-/// A series Auto-Sync watches: at least one episode of it was downloaded.
+/// A series Auto-Sync watches: a download of at least one episode of it started.
 #[derive(Debug, Serialize)]
 pub struct TrackedTitle {
     #[serde(flatten)]
@@ -144,6 +144,8 @@ impl Core {
                     dir: &last.dir,
                     imdb_id: last.imdb_id.as_deref(),
                     now: now(),
+                    // Episodes someone deleted stay deleted.
+                    replace_done: false,
                 };
                 queued += usize::from(self.store.enqueue(&new)?.is_some());
             }
@@ -195,23 +197,23 @@ fn done<'a>(jobs: &'a [Job], title: &'a TitleRef) -> impl Iterator<Item = &'a Jo
     of_title(jobs, title).filter(|job| job.state == JobState::Done)
 }
 
-/// Series with at least one downloaded episode, minus excluded titles, disabled sites and
-/// titles removed since their last download, by title.
+/// Series with at least one download that started, minus excluded titles, disabled sites
+/// and titles removed since their last start, by title. A title is followed from the moment
+/// its first download starts, not only once one finished.
 fn tracked(settings: &Settings, jobs: &[Job]) -> Vec<TitleRef> {
     let mut titles: Vec<TitleRef> = Vec::new();
-    let done: Vec<&Job> = jobs
-        .iter()
-        .filter(|job| job.state == JobState::Done)
-        .collect();
-    for job in &done {
+    let started: Vec<&Job> = jobs.iter().filter(|job| job.started()).collect();
+    // Downloads from before 1.2.10 know only when they were queued.
+    let started_at = |job: &Job| job.started_at.unwrap_or(job.queued_at);
+    for job in &started {
         let (site, slug) = (job.episode.site, &job.episode.slug);
         let is_it = |title: &TitleRef| title.site == site && title.slug == *slug;
         let removed = settings.auto_sync.removed.iter().any(|removed| {
             is_it(&removed.title)
-                && !done.iter().any(|other| {
+                && !started.iter().any(|other| {
                     other.episode.site == site
                         && other.episode.slug == *slug
-                        && other.queued_at > removed.at
+                        && started_at(other) > removed.at
                 })
         });
         let skipped = settings.disabled_sites.contains(&site)
@@ -301,6 +303,7 @@ mod tests {
             hidden: false,
             queued_at,
             imdb_id: None,
+            started_at: None,
         }
     }
 
@@ -327,6 +330,26 @@ mod tests {
         // Removed, not excluded: a later download tracks it again.
         assert_eq!(slugs(&[done_job("a", 50), done_job("a", 150)]), ["a"]);
         assert!(settings.auto_sync.excluded.is_empty());
+    }
+
+    #[test]
+    fn titles_are_tracked_once_a_download_starts() {
+        let settings = Settings::default();
+        let slugs = |jobs: &[Job]| {
+            let titles = tracked(&settings, jobs);
+            titles.into_iter().map(|t| t.slug).collect::<Vec<_>>()
+        };
+        let mut waiting = done_job("a", 10);
+        waiting.state = JobState::Queued;
+        assert!(slugs(&[waiting.clone()]).is_empty());
+        let mut running = waiting.clone();
+        running.state = JobState::Running;
+        running.started_at = Some(20);
+        assert_eq!(slugs(&[running.clone()]), ["a"]);
+        // A started download that failed keeps the title tracked.
+        let mut failed = running;
+        failed.state = JobState::Failed;
+        assert_eq!(slugs(&[failed]), ["a"]);
     }
 
     #[test]

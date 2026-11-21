@@ -80,8 +80,12 @@ CREATE TABLE requests (
 );
 ";
 
+/// Added in 1.2.10: when a worker last started a job, so Auto-Sync follows a title from its
+/// first download on.
+const STARTED_AT: &str = "ALTER TABLE jobs ADD COLUMN started_at INTEGER;";
+
 const JOB_COLUMNS: &str = "id, site, slug, season, episode, series_title, state, progress, error, path, \
-     language, hoster, dir, hidden, queued_at, imdb_id";
+     language, hoster, dir, hidden, queued_at, imdb_id, started_at";
 
 const REQUEST_COLUMNS: &str = "r.id, r.user_id, u.name, r.site, r.slug, r.series_title, r.picked, \
      r.language, r.hoster, r.imdb_id, r.state, r.created_at";
@@ -116,6 +120,9 @@ pub struct NewJob<'a> {
     pub imdb_id: Option<&'a str>,
     /// Unix seconds.
     pub now: i64,
+    /// Also queue it again when it is done, because its file is gone. Never for Auto-Sync:
+    /// an episode someone deleted stays deleted.
+    pub replace_done: bool,
 }
 
 pub struct Store {
@@ -133,7 +140,12 @@ impl Store {
 
     fn init(mut conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        Migrations::new(vec![M::up(SCHEMA), M::up(REQUESTS_AND_IMDB)]).to_latest(&mut conn)?;
+        Migrations::new(vec![
+            M::up(SCHEMA),
+            M::up(REQUESTS_AND_IMDB),
+            M::up(STARTED_AT),
+        ])
+        .to_latest(&mut conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -286,8 +298,8 @@ impl Store {
     // Jobs
 
     /// Queues an episode and returns the job id. A failed or cancelled job for the same
-    /// episode is queued again with the new choices; `None` means it is already queued,
-    /// running or done.
+    /// episode is queued again with the new choices, a done one too with `replace_done`;
+    /// `None` means it is already queued, running or done.
     pub fn enqueue(&self, new: &NewJob) -> Result<Option<i64>> {
         Ok(self
             .conn()
@@ -300,7 +312,7 @@ impl Store {
                          user_id = excluded.user_id, language = excluded.language,
                          hoster = excluded.hoster, dir = excluded.dir,
                          queued_at = excluded.queued_at, imdb_id = excluded.imdb_id
-                     WHERE state IN ('failed', 'cancelled')
+                     WHERE state IN ('failed', 'cancelled') OR (?12 AND state = 'done')
                  RETURNING id",
                 params![
                     new.episode.site.as_str(),
@@ -313,7 +325,8 @@ impl Store {
                     new.hoster,
                     new.dir,
                     new.now,
-                    new.imdb_id
+                    new.imdb_id,
+                    new.replace_done
                 ],
                 |row| row.get(0),
             )
@@ -340,16 +353,6 @@ impl Store {
             ],
             |row| row.get(0),
         )?)
-    }
-
-    /// How many of a user's requests wait for a decision.
-    pub fn open_requests(&self, user_id: i64) -> Result<usize> {
-        let count: i64 = self.conn().query_row(
-            "SELECT count(*) FROM requests WHERE user_id = ?1 AND state = 'open'",
-            [user_id],
-            |row| row.get(0),
-        )?;
-        Ok(usize::try_from(count).unwrap_or(usize::MAX))
     }
 
     /// Open requests first, then the newest. With `user`, only that user's requests.
@@ -435,13 +438,13 @@ impl Store {
         Ok(jobs)
     }
 
-    /// Marks the oldest queued job as running and returns it.
+    /// Marks the oldest queued job as running, notes when, and returns it.
     pub fn claim_next(&self) -> Result<Option<Job>> {
         Ok(self
             .conn()
             .query_row(
                 &format!(
-                    "UPDATE jobs SET state = 'running'
+                    "UPDATE jobs SET state = 'running', started_at = unixepoch()
                      WHERE id = (SELECT id FROM jobs WHERE state = 'queued' ORDER BY id LIMIT 1)
                      RETURNING {JOB_COLUMNS}"
                 ),
@@ -587,6 +590,7 @@ fn job(row: &Row) -> rusqlite::Result<Job> {
         hidden: row.get(13)?,
         queued_at: row.get(14)?,
         imdb_id: row.get(15)?,
+        started_at: row.get(16)?,
     })
 }
 
@@ -646,6 +650,7 @@ mod tests {
             dir: "/media",
             imdb_id: Some("tt0388629"),
             now: 100,
+            replace_done: false,
         }
     }
 
@@ -837,6 +842,33 @@ mod tests {
             (job.state, job.path.as_deref()),
             (JobState::Cancelled, None)
         );
+    }
+
+    #[test]
+    fn done_jobs_are_queued_again_only_when_asked() {
+        let (store, admin) = store_with_admin();
+        let first = episode(1);
+        let new = new_job(&first, admin.id);
+        let id = store.enqueue(&new).unwrap().unwrap();
+        assert_eq!(store.jobs().unwrap()[0].started_at, None);
+        store.claim_next().unwrap();
+        assert!(store.jobs().unwrap()[0].started_at.is_some());
+        store
+            .finish(id, "/media/x.mkv", Language::GermanSub)
+            .unwrap();
+
+        assert_eq!(store.enqueue(&new).unwrap(), None);
+        let again = NewJob {
+            replace_done: true,
+            ..new_job(&first, admin.id)
+        };
+        assert_eq!(store.enqueue(&again).unwrap(), Some(id));
+        let job = &store.jobs().unwrap()[0];
+        assert_eq!(job.state, JobState::Queued);
+        // Started once, so Auto-Sync keeps following the title.
+        assert!(job.started_at.is_some());
+        // A queued or running job is never replaced.
+        assert_eq!(store.enqueue(&again).unwrap(), None);
     }
 
     #[test]

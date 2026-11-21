@@ -235,7 +235,7 @@ impl Core {
 }
 
 /// Whether the file of a finished download is still there.
-fn on_disk(job: &Job) -> bool {
+pub(crate) fn on_disk(job: &Job) -> bool {
     job.path
         .as_deref()
         .is_some_and(|path| Path::new(path).is_file())

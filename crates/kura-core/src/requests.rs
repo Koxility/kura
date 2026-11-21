@@ -6,9 +6,6 @@ use kura_store::NewRequest;
 
 use crate::{Choices, Core, CoreError, Event, Result, Selection, auth::now, check_picked};
 
-/// Most requests one user may have waiting for an admin at the same time.
-pub const MOST_OPEN_REQUESTS: usize = 100;
-
 impl Core {
     /// Stores a request after the same checks a download gets. Returns its id.
     pub async fn request(
@@ -31,11 +28,6 @@ impl Core {
             seasons,
             episodes,
         };
-        if self.store.open_requests(user_id)? >= MOST_OPEN_REQUESTS {
-            return Err(CoreError::Invalid(
-                "you have too many open requests; wait until an admin decides on some",
-            ));
-        }
         let series = source.series(slug).await?;
         let id = self.store.create_request(&NewRequest {
             user_id,

@@ -78,6 +78,9 @@ export function SeriesPage() {
       setWholeSeasons([]);
       setSingle([]);
       client.invalidateQueries({ queryKey: [admin ? "queue" : "requests"] });
+      // What is on disk and what Auto-Sync follows may have changed with it.
+      client.invalidateQueries({ queryKey: ["downloaded", site, slug] });
+      client.invalidateQueries({ queryKey: ["autosync"] });
     },
   });
   const exclude = useMutation({

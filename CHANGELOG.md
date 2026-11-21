@@ -4,6 +4,21 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.2.10] - 2026-11-21
+
+### Added
+
+- Kura can tell Jellyfin about new episodes. Under *Settings → Jellyfin*, enter the server's address and an API key. When the queue is empty, Kura asks Jellyfin once to scan the series folders that got new episodes, and only those, never the whole library. A season or an Auto-Sync batch causes one scan, not one per episode. A failed download stays in the queue and does not hold back the scan of what arrived. If Jellyfin sees a library under another path, set *Path in Jellyfin* for that library.
+
+### Fixed
+
+- **Download Selected** no longer answers "Already in the queue or downloaded." for episodes that are neither. An episode whose file was deleted after it was downloaded still counted as done, so it could never be queued again, while its title page showed it as missing. Kura now reads the folders and the queue again when you queue, and downloads such an episode again. Episodes that are queued, downloading or still in a library folder are skipped as before, and Auto-Sync still never downloads an episode again that you deleted.
+
+### Changed
+
+- A title joins Auto-Sync as soon as its first download starts, not only once one has finished.
+- A user can have any number of requests waiting for an admin; the limit of 100 is gone.
+
 ## [1.2.9] - 2026-11-18
 
 ### Fixed
@@ -196,7 +211,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.9...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.2.10...HEAD
+[1.2.10]: https://github.com/Koxility/kura/compare/v1.2.9...v1.2.10
 [1.2.9]: https://github.com/Koxility/kura/compare/v1.2.8...v1.2.9
 [1.2.8]: https://github.com/Koxility/kura/compare/v1.2.7...v1.2.8
 [1.2.7]: https://github.com/Koxility/kura/compare/v1.2.6...v1.2.7

@@ -21,7 +21,7 @@ The admin presses **Accept** or **Reject**:
 - **Accept** queues the episodes with the language and provider the user chose, into the site's default library (else the main library). Episodes that are already downloaded or queued are skipped.
 - **Reject** queues nothing.
 
-One request can name up to 200 seasons or 5000 single episodes; for more, request the whole series. A user can have up to 100 requests waiting at the same time.
+One request can name up to 200 seasons or 5000 single episodes; for more, request the whole series. A user can have any number of requests waiting.
 
 Users see on their own Request page whether a request is waiting, accepted or rejected. While nobody has decided yet, they can **Cancel** it.
 

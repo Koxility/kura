@@ -218,6 +218,7 @@ fn library(name: &str, path: PathBuf, default_for: Vec<SiteId>) -> Library {
         name: name.to_owned(),
         path,
         default_for,
+        jellyfin_path: None,
     }
 }
 
@@ -627,6 +628,7 @@ fn unusable_settings_are_refused() {
         name: name.to_owned(),
         path: PathBuf::from(path),
         default_for,
+        jellyfin_path: None,
     };
     let schedule = |schedule| AutoSync {
         schedule,
@@ -739,6 +741,7 @@ fn titles_become_safe_folder_names() {
         hidden: false,
         queued_at: 0,
         imdb_id: imdb_id.map(str::to_owned),
+        started_at: None,
     };
     let path = |imdb| {
         let template = "{title} {episodenumber}";
@@ -1212,13 +1215,11 @@ async fn requests_and_selections_have_limits() {
         (1, 1)
     );
 
-    // A user can only have so many requests waiting.
-    for _ in 1..requests::MOST_OPEN_REQUESTS {
+    // A user may have as many requests waiting as they like.
+    for _ in 0..150 {
         ask(picked(vec![1], Vec::new())).await.unwrap();
     }
-    assert!(too_many(ask(picked(vec![1], Vec::new())).await));
-    s.core.reject_request(id).unwrap();
-    ask(picked(vec![1], Vec::new())).await.unwrap();
+    assert_eq!(s.core.requests(Some(sam.id)).unwrap().len(), 151);
 
     // A request stored before the limits existed is refused when accepted, and stays open.
     let old = s.core.store.create_request(&kura_store::NewRequest {
@@ -1240,4 +1241,214 @@ async fn requests_and_selections_have_limits() {
     let open = s.core.requests(None).unwrap();
     let open = open.iter().find(|request| request.id == old).unwrap();
     assert_eq!(open.state, kura_domain::RequestState::Open);
+}
+
+/// The title page showed an episode as missing, but Download Selected answered "Already in
+/// the queue or downloaded": its finished download was still on record, its file was not.
+#[tokio::test]
+async fn an_episode_whose_file_was_deleted_can_be_downloaded_again() {
+    let s = setup(vec![link(Language::GermanDub, "voe", "https://voe/x")], 1);
+    s.queue(first(), Choices::default()).await.unwrap();
+    let jobs = states(&s.core, &[JobState::Done]).await;
+    let file = PathBuf::from(jobs[0].path.as_deref().unwrap());
+
+    // Still there: skipped, as before.
+    assert_eq!(s.queue(first(), Choices::default()).await.unwrap(), 0);
+
+    // Cleared from the queue page and deleted from the disk.
+    s.core.clear_finished().unwrap();
+    std::fs::remove_file(&file).unwrap();
+    let shown = s
+        .core
+        .downloaded_episodes(
+            SiteId::AniWorld,
+            "lantern-road",
+            "Lantern Road",
+            Some("tt0388629"),
+        )
+        .unwrap();
+    assert!(shown.is_empty());
+    // Auto-Sync leaves a deleted episode alone.
+    assert_eq!(s.core.sync_once().await.unwrap(), 0);
+    assert_eq!(s.queue(first(), Choices::default()).await.unwrap(), 1);
+    let jobs = states(&s.core, &[JobState::Done]).await;
+    assert!(!jobs[0].hidden);
+    assert!(file.is_file());
+
+    // Moved by hand to another file in the series folder: still downloaded, so skipped.
+    let moved = file.with_file_name("Lantern Road S01E001 moved.mkv");
+    std::fs::rename(&file, &moved).unwrap();
+    assert_eq!(s.queue(first(), Choices::default()).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn a_queued_or_running_episode_is_not_queued_twice() {
+    let s = setup(
+        vec![link(Language::GermanDub, "voe", "https://voe/slow")],
+        1,
+    );
+    let both = Selection::Picked {
+        seasons: Vec::new(),
+        episodes: vec![(1, 1), (1, 2)],
+    };
+    assert_eq!(s.queue(both.clone(), Choices::default()).await.unwrap(), 2);
+    states(&s.core, &[JobState::Running, JobState::Queued]).await;
+    assert_eq!(s.queue(both, Choices::default()).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn a_title_joins_auto_sync_when_its_download_starts() {
+    let s = setup(
+        vec![link(Language::GermanDub, "voe", "https://voe/slow")],
+        1,
+    );
+    let both = Selection::Picked {
+        seasons: Vec::new(),
+        episodes: vec![(1, 1), (1, 2)],
+    };
+    s.queue(both, Choices::default()).await.unwrap();
+    states(&s.core, &[JobState::Running, JobState::Queued]).await;
+    let titles = s.core.sync_status().unwrap().titles;
+    assert_eq!(titles.len(), 1);
+    assert_eq!(titles[0].title.slug, "lantern-road");
+    // Nothing is on disk yet, so Auto-Sync has nothing to add.
+    assert_eq!(s.core.sync_once().await.unwrap(), 0);
+}
+
+/// A fake Jellyfin that answers 204 and records each request's head and body.
+async fn fake_jellyfin() -> (String, Arc<Mutex<Vec<(String, String)>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let record = seen.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            let mut data = Vec::new();
+            let mut buf = [0u8; 4096];
+            let (head, body) = loop {
+                let read = socket.read(&mut buf).await.unwrap();
+                data.extend_from_slice(&buf[..read]);
+                let text = String::from_utf8_lossy(&data).into_owned();
+                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                    let length = head
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    if body.len() >= length || read == 0 {
+                        break (head.to_owned(), body.to_owned());
+                    }
+                }
+                if read == 0 {
+                    break (text, String::new());
+                }
+            };
+            record.lock().unwrap().push((head, body));
+            let answer =
+                "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            let _ = socket.write_all(answer.as_bytes()).await;
+        }
+    });
+    (url, seen)
+}
+
+#[tokio::test]
+async fn jellyfin_scans_the_new_series_folders_once_the_queue_is_empty() {
+    let s = setup(vec![link(Language::GermanDub, "voe", "https://voe/x")], 1);
+    let (url, seen) = fake_jellyfin().await;
+    let mut settings = s.core.settings().unwrap();
+    settings.libraries[0].jellyfin_path = Some("/jf/tv".into());
+    settings.jellyfin = kura_domain::Jellyfin {
+        url: format!("{url}/"),
+        api_key: "secret".to_owned(),
+    };
+    s.core.save_settings(&settings).unwrap();
+
+    // One episode of another site that fails, then two that arrive.
+    let failing = EpisodeId {
+        site: SiteId::SerienStream,
+        slug: "broken".to_owned(),
+        season: 1,
+        number: 1,
+    };
+    let dir = s.path("main").to_string_lossy().into_owned();
+    s.core
+        .store
+        .enqueue(&kura_store::NewJob {
+            episode: &failing,
+            series_title: "Broken",
+            user_id: None,
+            language: None,
+            hoster: None,
+            dir: &dir,
+            imdb_id: Some("none"),
+            now: 0,
+            replace_done: false,
+        })
+        .unwrap();
+    let both = Selection::Picked {
+        seasons: Vec::new(),
+        episodes: vec![(1, 1), (1, 2)],
+    };
+    s.queue(both, Choices::default()).await.unwrap();
+    let jobs = states(&s.core, &[JobState::Failed, JobState::Done, JobState::Done]).await;
+
+    for _ in 0..200 {
+        if !seen.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    // Later wake-ups of the worker do not ask again.
+    s.core.clear_finished().unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let seen = seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1, "{seen:#?}");
+    let (head, body) = &seen[0];
+    assert!(head.starts_with("POST /Library/Media/Updated "), "{head}");
+    assert!(head.contains("Token=\"secret\""), "{head}");
+
+    let folder = downloaded::series_folder(Path::new(jobs[1].path.as_deref().unwrap())).unwrap();
+    let name = folder.file_name().unwrap().to_string_lossy().into_owned();
+    let body: serde_json::Value = serde_json::from_str(body).unwrap();
+    let updates = body["Updates"].as_array().unwrap();
+    // Only the one series folder, as Jellyfin sees it; not the whole library.
+    assert_eq!(updates.len(), 1, "{body}");
+    assert_eq!(updates[0]["Path"], format!("/jf/tv/{name}"));
+    assert_eq!(updates[0]["UpdateType"], "Modified");
+}
+
+#[tokio::test]
+async fn without_jellyfin_nothing_is_asked_and_bad_settings_are_refused() {
+    let s = setup(vec![link(Language::GermanDub, "voe", "https://voe/x")], 1);
+    let mut settings = s.core.settings().unwrap();
+    settings.jellyfin.url = "jellyfin:8096".to_owned();
+    settings.jellyfin.api_key = "key".to_owned();
+    assert!(matches!(
+        s.core.save_settings(&settings),
+        Err(CoreError::Invalid(_))
+    ));
+    settings.jellyfin.url = "http://127.0.0.1:9".to_owned();
+    settings.jellyfin.api_key = String::new();
+    assert!(s.core.save_settings(&settings).is_err());
+    // Off: downloads work and nothing is kept for later.
+    s.queue(first(), Choices::default()).await.unwrap();
+    states(&s.core, &[JobState::Done]).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(s.core.pending_scan.lock().unwrap().is_empty());
+    let unreachable = kura_domain::Jellyfin {
+        url: "http://127.0.0.1:9".to_owned(),
+        api_key: "key".to_owned(),
+    };
+    assert!(matches!(
+        s.core.test_jellyfin(&unreachable).await,
+        Err(CoreError::Jellyfin(_))
+    ));
 }

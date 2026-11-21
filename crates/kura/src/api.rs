@@ -87,6 +87,7 @@ fn router(core: Arc<Core>) -> Router {
         .route("/library", get(library_roots))
         .route("/library/{root}", get(browse))
         .route("/admin/ip", get(public_ip))
+        .route("/admin/jellyfin/test", post(test_jellyfin))
         .route("/users", get(users).post(create_user))
         .route("/users/{id}", delete(delete_user))
         .fallback(|| async { ApiError(StatusCode::NOT_FOUND, "no such endpoint".into()) })
@@ -124,6 +125,7 @@ impl From<CoreError> for ApiError {
                 StatusCode::NOT_FOUND
             }
             CoreError::TooManyLogins(_) => StatusCode::TOO_MANY_REQUESTS,
+            CoreError::Jellyfin(_) => StatusCode::BAD_GATEWAY,
             // The site did not answer or changed its pages.
             CoreError::Site(_) => StatusCode::BAD_GATEWAY,
             CoreError::Store(_) | CoreError::Http(_) | CoreError::Hashing(_) => {
@@ -711,6 +713,17 @@ async fn browse(
 
 async fn public_ip(State(core): App, _: Admin) -> ApiResult<Json<Value>> {
     Ok(Json(json!({ "ip": core.public_ip().await? })))
+}
+
+/// Checks the Jellyfin settings sent along, so they can be tried before they are saved.
+async fn test_jellyfin(
+    State(core): App,
+    _: Admin,
+    Json(jellyfin): Json<kura_domain::Jellyfin>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(
+        json!({ "server": core.test_jellyfin(&jellyfin).await? }),
+    ))
 }
 
 // Web app

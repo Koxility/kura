@@ -162,6 +162,18 @@ pub struct Job {
     /// For the folder name: an IMDb ID or `none`. Absent on downloads from before folders
     /// carried the ID; those keep the old folder name.
     pub imdb_id: Option<String>,
+    /// Unix seconds of the last time a worker started it. `None` until it first started, and
+    /// on downloads from before 1.2.10.
+    #[serde(default)]
+    pub started_at: Option<i64>,
+}
+
+impl Job {
+    /// Whether a worker ever started this download; downloads from before 1.2.10 that are
+    /// done count as started.
+    pub fn started(&self) -> bool {
+        self.started_at.is_some() || self.state == JobState::Done
+    }
 }
 
 text_enum! {
@@ -230,6 +242,24 @@ pub struct Settings {
     /// Sites left out of search, lists and Auto-Sync.
     pub disabled_sites: Vec<SiteId>,
     pub auto_sync: AutoSync,
+    /// Told to scan the series folders that got new episodes once the queue is empty.
+    pub jellyfin: Jellyfin,
+}
+
+/// A Jellyfin server to tell about new files. Off while `url` is empty.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Jellyfin {
+    /// E.g. `http://192.168.1.10:8096`.
+    pub url: String,
+    /// An API key from Jellyfin's dashboard (Administration, API Keys).
+    pub api_key: String,
+}
+
+impl Jellyfin {
+    pub fn enabled(&self) -> bool {
+        !self.url.trim().is_empty()
+    }
 }
 
 /// A named folder downloads can go to.
@@ -240,6 +270,10 @@ pub struct Library {
     /// Sites whose downloads go here unless the user picks another library.
     #[serde(default)]
     pub default_for: Vec<SiteId>,
+    /// The same folder as Jellyfin sees it, when Jellyfin mounts it elsewhere. `None` when
+    /// both see the same path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jellyfin_path: Option<PathBuf>,
 }
 
 /// Checks for new episodes of series that were downloaded before.
@@ -252,8 +286,8 @@ pub struct AutoSync {
     pub schedule: Schedule,
     /// Titles Auto-Sync leaves alone.
     pub excluded: Vec<TitleRef>,
-    /// Titles taken off the tracked list. One is tracked again once an episode of it is
-    /// queued after it was removed.
+    /// Titles taken off the tracked list. One is tracked again once a download of it starts
+    /// after it was removed.
     pub removed: Vec<RemovedTitle>,
 }
 
@@ -313,6 +347,7 @@ impl Default for Settings {
             libraries: Vec::new(),
             disabled_sites: Vec::new(),
             auto_sync: AutoSync::default(),
+            jellyfin: Jellyfin::default(),
         }
     }
 }

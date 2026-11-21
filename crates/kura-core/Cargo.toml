@@ -29,5 +29,6 @@ sha2 = "0.11.1"
 getrandom = "0.4.3"
 
 [dev-dependencies]
+serde_json.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["time", "net", "io-util"] }
