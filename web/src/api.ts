@@ -73,6 +73,9 @@ export interface Theme {
   ascii_library: string[];
 }
 
+/** "glass": frosted glass over the whole window; "halo": a dark glow around text. */
+export type Backdrop = "glass" | "halo";
+
 /** A song an admin uploaded for the background music. */
 export interface Song {
   id: string;
@@ -173,6 +176,7 @@ export interface Settings {
     removed: (TitleRef & { at: number })[];
   };
   jellyfin: Jellyfin;
+  backdrop: Backdrop;
 }
 
 export interface Status {
@@ -181,6 +185,8 @@ export interface Status {
   version: string;
   /** Short commit hash of the build, or `unknown`. */
   commit: string;
+  /** How text stays readable over the ASCII background, the same for every account. */
+  backdrop: Backdrop;
   repository: string;
   /** A newer release on GitHub, like `1.2.0`; absent while this one is the newest. */
   latest_version: string | null;

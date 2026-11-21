@@ -257,6 +257,7 @@ async fn status(State(core): App, headers: HeaderMap) -> ApiResult<Json<Value>> 
         "user": user,
         "version": env!("CARGO_PKG_VERSION"),
         "commit": env!("KURA_COMMIT"),
+        "backdrop": core.settings()?.backdrop,
         "repository": format!("https://github.com/{REPOSITORY}"),
         "latest_version": core.newer_release(),
         "needs_library": core.settings()?.libraries.is_empty(),

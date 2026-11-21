@@ -11,23 +11,15 @@
 }
 
 .lead {
-  width: fit-content;
   max-width: 68ch;
   margin: 16px auto 0;
-  padding: 0 8px;
-  border-radius: var(--radius);
-  background: var(--plate);
   color: var(--text-2);
   text-align: center;
 }
 
 /* A heading inside a page: clearly below the page title, with room above it. */
 .section {
-  width: fit-content;
   margin: 64px auto 16px;
-  padding: 0 8px;
-  border-radius: var(--radius);
-  background: var(--plate);
   text-align: center;
   font-size: var(--size-l);
   font-weight: 600;
@@ -35,11 +27,7 @@
 }
 
 .notice {
-  width: fit-content;
   margin: 32px auto;
-  padding: 4px 12px;
-  border-radius: var(--radius);
-  background: var(--plate);
   color: var(--text-2);
   text-align: center;
 }
@@ -61,7 +49,7 @@
   padding: 8px 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--plate);
+  background: var(--control-fill);
   color: var(--text);
   font: 500 var(--size-s) / 1.4 var(--font);
   white-space: nowrap;
@@ -157,7 +145,6 @@
   gap: 16px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
-  background: var(--plate);
 }
 
 .grow {
@@ -228,11 +215,7 @@
 
 .cardTitle {
   display: block;
-  width: fit-content;
-  max-width: 100%;
   margin-top: 8px;
-  padding-right: 4px;
-  background: var(--plate);
   font-size: var(--size-s);
   font-weight: 500;
   line-height: 1.35;
@@ -240,10 +223,7 @@
 
 .cardSite {
   display: block;
-  width: fit-content;
   margin-top: 2px;
-  padding-right: 4px;
-  background: var(--plate);
   color: var(--text-3);
   font-size: var(--size-xs);
 }
@@ -297,7 +277,7 @@
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: calc(var(--radius) + 3px);
-  background: var(--plate);
+  background: var(--control-fill);
 }
 
 .segment {
@@ -320,8 +300,8 @@
 
 .segment[aria-pressed="true"],
 .segment[aria-current="page"] {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--hover);
+  color: var(--text);
 }
 
 /* Chips: many small choices, e.g. genres */
@@ -340,7 +320,7 @@
   padding: 4px 12px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: var(--plate);
+  background: var(--control-fill);
   color: var(--text-2);
   font: 400 var(--size-s) / 1.4 var(--font);
   cursor: pointer;
@@ -363,10 +343,6 @@
 /* A checkbox or switch with its label */
 
 .check {
-  width: fit-content;
-  padding-right: 6px;
-  border-radius: var(--radius);
-  background: var(--plate);
   display: flex;
   align-items: center;
   gap: 10px;

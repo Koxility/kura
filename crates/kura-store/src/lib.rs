@@ -808,6 +808,7 @@ mod tests {
         assert_eq!(store.settings().unwrap(), Settings::default());
         let changed = Settings {
             parallel: 2,
+            backdrop: kura_domain::Backdrop::Halo,
             ..Settings::default()
         };
         store.save_settings(&changed).unwrap();
@@ -1022,6 +1023,12 @@ mod tests {
         assert!(store.delete_user(sam.id).unwrap());
         assert_eq!(store.api_key_user("hash", 30).unwrap(), None);
         assert!(store.api_keys(sam.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn settings_from_before_the_backdrop_choice_use_glass() {
+        let old: Settings = serde_json::from_str(r#"{"parallel": 3}"#).unwrap();
+        assert_eq!(old.backdrop, kura_domain::Backdrop::Glass);
     }
 
     #[test]

@@ -357,6 +357,19 @@ pub struct Settings {
     pub auto_sync: AutoSync,
     /// Told to scan the series folders that got new episodes once the queue is empty.
     pub jellyfin: Jellyfin,
+    /// How text stays readable over an ASCII background, for every account.
+    pub backdrop: Backdrop,
+}
+
+/// How the web app keeps text readable while an ASCII background runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Backdrop {
+    /// Frosted glass over the whole window: the picture is blurred and dimmed behind it.
+    #[default]
+    Glass,
+    /// The picture stays sharp; text gets a dark halo, controls a plain fill.
+    Halo,
 }
 
 /// A Jellyfin server to tell about new files. Off while `url` is empty.
@@ -461,6 +474,7 @@ impl Default for Settings {
             disabled_sites: Vec::new(),
             auto_sync: AutoSync::default(),
             jellyfin: Jellyfin::default(),
+            backdrop: Backdrop::default(),
         }
     }
 }

@@ -1,6 +1,6 @@
 .bar {
-  /* Opaque already: nothing in it needs a plate. */
-  --plate: transparent;
+  /* Opaque already: its controls need no fill of their own. */
+  --control-fill: transparent;
   position: sticky;
   top: 0;
   z-index: 1;
@@ -71,9 +71,8 @@
 
 /* The current page: accent text over a thin accent line. */
 .link[aria-current="page"] {
-  color: var(--accent);
-  background: var(--accent-soft);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--text);
+  background: var(--hover);
 }
 
 .icon {
@@ -110,16 +109,10 @@
 
 /* Page titles are centred; lists below them use the full column. */
 .main h1 {
-  width: fit-content;
-  margin-inline: auto;
-  padding: 0 8px;
-  border-radius: var(--radius);
-  background: var(--plate);
   text-align: center;
 }
 
 .footer {
-  background: var(--plate);
   display: flex;
   flex-wrap: wrap;
   justify-content: center;

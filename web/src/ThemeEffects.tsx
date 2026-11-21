@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { load, mount, names, type Piece, type PieceName } from "ascii.rest";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import { accountQuery, songsQuery } from "./api";
+import { accountQuery, type Backdrop, songsQuery, statusQuery } from "./api";
 import styles from "./ThemeEffects.module.css";
 
 /** Whether ascii.rest has a piece of this name; every piece ships with Kura, each loaded
@@ -28,13 +28,16 @@ export const pieceTitle = (name: string) => {
 export function ThemeEffects() {
   const account = useQuery(accountQuery);
   const songs = useQuery(songsQuery);
+  const status = useQuery(statusQuery);
   const theme = account.data?.theme;
   const list = songs.data ?? [];
   const song = list.find((known) => known.id === theme?.song) ?? list[0];
   return (
     <>
       {theme?.music && song && <Music id={song.id} volume={theme.volume} />}
-      {theme?.ascii && <Background piece={theme.ascii_piece} />}
+      {theme?.ascii && (
+        <Background piece={theme.ascii_piece} look={status.data?.backdrop ?? "glass"} />
+      )}
     </>
   );
 }
@@ -73,8 +76,9 @@ function Music({ id, volume }: { id: string; volume: number }) {
 }
 
 /** A faint animated scene behind the pages. Coloured pieces keep their colours, washed out;
- *  plain ones are drawn in the faintest text colour. */
-function Background({ piece: name }: { piece: string }) {
+ *  plain ones are drawn in the faintest text colour. How text stays readable over it is the
+ *  admin's choice for everyone: frosted glass over the whole window, or a halo around text. */
+function Background({ piece: name, look }: { piece: string; look: Backdrop }) {
   const [piece, setPiece] = useState<Piece | null>(null);
   const art = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -86,13 +90,13 @@ function Background({ piece: name }: { piece: string }) {
       live = false;
     };
   }, [name]);
-  // While the picture runs, text on the page gets a plain plate (see --plate in tokens.css).
+  // The look's rules hang off the root element (base.css, tokens.css).
   useEffect(() => {
-    document.documentElement.dataset.backdrop = "ascii";
+    document.documentElement.dataset.backdrop = look;
     return () => {
       delete document.documentElement.dataset.backdrop;
     };
-  }, []);
+  }, [look]);
   const coloured = Boolean(piece?.meta.palette);
   useEffect(() => {
     if (!piece || !art.current) return;
@@ -101,16 +105,19 @@ function Background({ piece: name }: { piece: string }) {
   if (!piece) return null;
   const { cols, rows } = piece.meta;
   return (
-    <div
-      className={coloured ? `${styles.background} ${styles.coloured}` : styles.background}
-      aria-hidden="true"
-      style={{ "--cols": cols, "--rows": rows } as CSSProperties}
-    >
-      {coloured ? (
-        <canvas ref={(element) => { art.current = element; }} className={styles.canvas} />
-      ) : (
-        <pre ref={(element) => { art.current = element; }} className={styles.art} />
-      )}
-    </div>
+    <>
+      <div
+        className={coloured ? `${styles.background} ${styles.coloured}` : styles.background}
+        aria-hidden="true"
+        style={{ "--cols": cols, "--rows": rows } as CSSProperties}
+      >
+        {coloured ? (
+          <canvas ref={(element) => { art.current = element; }} className={styles.canvas} />
+        ) : (
+          <pre ref={(element) => { art.current = element; }} className={styles.art} />
+        )}
+      </div>
+      {look === "glass" && <div className={styles.glass} aria-hidden="true" />}
+    </>
   );
 }

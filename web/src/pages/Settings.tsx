@@ -5,6 +5,7 @@ import {
   type Account,
   accountQuery,
   type ApiKey,
+  type Backdrop,
   api,
   hosterNames,
   type Jellyfin as JellyfinSettings,
@@ -1054,6 +1055,7 @@ function ThemeSection({ admin }: { admin: boolean }) {
         A faint animated scene behind the pages. Pieces with colour keep it, washed out.
       </p>
       <AsciiLibrary theme={theme} onChange={set} />
+      {admin && <BackdropLook />}
       {save.isError && (
         <p className={ui.error} role="alert">
           {save.error.message}
@@ -1104,6 +1106,60 @@ function Volume({
         onBlur={commit}
       />
     </label>
+  );
+}
+
+/** How text stays readable over the background: one choice for every account. */
+function BackdropLook() {
+  const client = useQueryClient();
+  const settings = useQuery(settingsQuery);
+  const save = useMutation({
+    mutationFn: (backdrop: Backdrop) =>
+      api<Settings>("/settings", "PUT", { ...settings.data, backdrop }),
+    onSuccess: (saved) => {
+      client.setQueryData(settingsQuery.queryKey, saved);
+      // Every page reads the look from the status.
+      client.invalidateQueries({ queryKey: ["status"] });
+    },
+  });
+  if (!settings.data) return null;
+  const looks: { id: Backdrop; name: string; hint: string }[] = [
+    {
+      id: "glass",
+      name: "Frosted glass",
+      hint: "The picture is softened and dimmed behind frosted glass; text sits on it freely.",
+    },
+    {
+      id: "halo",
+      name: "Text halo",
+      hint: "The picture stays sharp; letters get a dark halo and controls a plain fill.",
+    },
+  ];
+  const current = save.isPending && save.variables ? save.variables : settings.data.backdrop;
+  return (
+    <fieldset className={styles.looks}>
+      <legend>Readability over the background, for all accounts</legend>
+      {looks.map((look) => (
+        <label key={look.id} className={styles.look}>
+          <span className={ui.check}>
+            <input
+              type="radio"
+              name="backdrop"
+              checked={current === look.id}
+              disabled={save.isPending}
+              onChange={() => save.mutate(look.id)}
+            />
+            {look.name}
+          </span>
+          <span className={styles.hint}>{look.hint}</span>
+        </label>
+      ))}
+      {save.isError && (
+        <p className={ui.error} role="alert">
+          {save.error.message}
+        </p>
+      )}
+    </fieldset>
   );
 }
 

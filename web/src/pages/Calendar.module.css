@@ -1,4 +1,5 @@
-/* Monday to Sunday, like AniWorld; stays in reach while the days scroll by. */
+/* Monday to Sunday, like AniWorld; stays in reach while the days scroll by. No strip behind
+   it, only the buttons. */
 .week {
   position: sticky;
   top: 56px;
@@ -8,14 +9,13 @@
   gap: 4px;
   margin: 24px 0 8px;
   padding: 8px 0;
-  background: var(--bg);
 }
 
 .weekday {
   padding: 8px 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--plate);
+  background: var(--control-fill);
   color: var(--text-2);
   font: inherit;
   font-size: var(--size-s);
@@ -53,7 +53,6 @@
 }
 
 .dayHeading {
-  background: var(--plate);
   display: flex;
   align-items: baseline;
   gap: 12px;
@@ -90,10 +89,11 @@
   mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
 }
 
-/* Under the cover, on one line: out-mark, episode, language, time. */
+/* Under the cover: out-mark, episode, language, time. On one line; only with many languages
+   the time moves to a second line, still on the right. */
 .meta {
-  background: var(--plate);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 5px;
   margin-top: 4px;

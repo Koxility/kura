@@ -93,6 +93,7 @@ Per account:
 
 - **Background music** (on by default): plays the chosen **Song** on a loop at the chosen **Volume** while Kura is open. Kura ships without songs; admins add MP3s here (at most 20 MB each, named after the file), which stay in the data folder, and every account picks from them. Browsers start sound only after the first click or key on the page.
 - **ASCII background** (off by default): a faint animated scene from [ascii.rest](https://ascii.rest) behind the pages, picked from your own list. Paste the link of any piece (e.g. `https://ascii.rest/aurora-fjord/`) to add it; pieces with colour keep it, washed out. Every piece ships with Kura, so nothing is loaded from ascii.rest.
+- **Readability over the background** (admins, for all accounts): *Frosted glass* (default) softens and dims the picture behind a sheet of glass; *Text halo* keeps the picture sharp and gives letters a dark glow.
 
 ## Settings → Users (admins)
 

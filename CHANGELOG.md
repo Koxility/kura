@@ -4,6 +4,16 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-11-21
+
+### Changed
+
+- **Readable over the ASCII background, without boxes.** The plain plates behind text from 1.3.3 are gone. By default a sheet of frosted, "liquid" glass lies over the whole window below the top bar: the picture behind it is softened and dimmed, with a faint light running across, and it has no edge anywhere, so text, lists and buttons sit on it freely.
+- **Choice for admins:** *Settings → Theme → Readability over the background* switches every account between *Frosted glass* and *Text halo*. With the halo, the picture stays sharp, letters get a tight dark glow like subtitles over video, and buttons and chips a plain fill.
+- **Less indigo:** the current page in the top bar, the picked site on Home (and the queue filters) and the current Settings section are grey again, as before 1.3.3. Buttons, checkboxes, sliders, focus, progress and today in the calendar keep the accent.
+- The weekday bar in the calendar has no strip behind it while the days scroll by.
+- A calendar card with many languages moves its time to a second line instead of past the card's edge.
+
 ## [1.3.3] - 2026-11-21
 
 ### Changed
@@ -260,7 +270,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.3.3...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.3.4...HEAD
+[1.3.4]: https://github.com/Koxility/kura/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/Koxility/kura/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/Koxility/kura/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/Koxility/kura/compare/v1.3.0...v1.3.1

@@ -44,3 +44,13 @@ a {
   min-height: 100vh;
   min-height: 100dvh;
 }
+
+/* The "halo" look over the ASCII background: a tight dark glow around every letter, like
+   subtitles over video, so text reads while the picture stays sharp. */
+:root[data-backdrop="halo"] main,
+:root[data-backdrop="halo"] footer {
+  text-shadow:
+    0 0 2px var(--bg),
+    0 0 6px var(--bg),
+    0 0 12px var(--bg);
+}

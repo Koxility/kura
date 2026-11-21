@@ -67,6 +67,8 @@ async fn setup_login_and_logout() {
         (200, &json!(true), &Value::Null)
     );
     assert_eq!(fresh["version"], env!("CARGO_PKG_VERSION"));
+    // Everyone, logged in or not, learns how the app looks over an ASCII background.
+    assert_eq!(fresh["backdrop"], "glass");
     assert_eq!(fresh["latest_version"], Value::Null);
     assert_eq!(fresh["needs_library"], true);
     // Where the server keeps its files is not for someone who is not logged in.

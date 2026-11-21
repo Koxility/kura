@@ -16,7 +16,6 @@
   gap: 2px;
   padding-right: 24px;
   border-right: 1px solid var(--line);
-  background: var(--plate);
 }
 
 .section {
@@ -35,9 +34,8 @@
 }
 
 .section[aria-current="page"] {
-  background: var(--accent-soft);
-  color: var(--accent);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--hover);
+  color: var(--text);
 }
 
 .content {
@@ -45,9 +43,6 @@
 }
 
 .heading {
-  width: fit-content;
-  padding-right: 8px;
-  background: var(--plate);
   margin: 0;
   font-size: var(--size-l);
   font-weight: 600;
@@ -69,7 +64,6 @@
 .content .left {
   justify-content: flex-start;
   margin-inline: 0;
-  padding-inline: 0;
   text-align: left;
 }
 
@@ -86,10 +80,6 @@
 }
 
 .hint {
-  width: fit-content;
-  padding-right: 6px;
-  border-radius: var(--radius);
-  background: var(--plate);
   max-width: 62ch;
   margin: 8px 0 0;
   color: var(--text-3);
@@ -207,6 +197,32 @@
 .secret code {
   overflow-wrap: anywhere;
   user-select: all;
+}
+
+/* The admin's choice of look over the ASCII background. */
+.looks {
+  display: grid;
+  gap: 12px;
+  margin: 28px 0 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.looks legend {
+  padding: 0 6px;
+  color: var(--text-2);
+  font-size: var(--size-s);
+}
+
+.look {
+  display: grid;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.look .hint {
+  margin: 0 0 0 26px;
 }
 
 /* Song and volume side by side. */

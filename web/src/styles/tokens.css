@@ -21,9 +21,9 @@
   /* Picked things: solid, so no background picture shows through. */
   --accent-soft: color-mix(in srgb, var(--accent) 14%, var(--bg));
 
-  /* Under text that sits on the page. Transparent, until a background picture runs behind the
-   * pages: then text gets a plain plate, so it stays readable. */
-  --plate: transparent;
+  /* Under buttons, chips and switches: transparent, and the page colour while the ASCII
+   * background runs with the "halo" look, so controls stand clear of the picture. */
+  --control-fill: transparent;
 
   /* State only: done, careful, failed, and news about Kura itself. */
   --ok: #3ecf8e;
@@ -48,6 +48,6 @@
   --content: 1080px;
 }
 
-:root[data-backdrop="ascii"] {
-  --plate: var(--bg);
+:root[data-backdrop="halo"] {
+  --control-fill: var(--bg);
 }
