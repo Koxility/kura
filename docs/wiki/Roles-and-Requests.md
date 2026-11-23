@@ -34,4 +34,4 @@ Every account, admin or user, changes its own name, password and email under Set
 
 ## Managing users
 
-Settings → Administration → Users. The last admin cannot be deleted, so nobody gets locked out. Deleting a user also deletes their requests and ends their logins.
+Settings → Administration → Users (add an account or invite someone by email; there is no open sign-up). The last admin cannot be deleted, so nobody gets locked out. Deleting a user also deletes their requests and ends their logins.

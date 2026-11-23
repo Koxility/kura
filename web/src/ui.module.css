@@ -87,6 +87,43 @@
   cursor: default;
 }
 
+/* Destroys something: red, outlined until hovered; solid red for the final "Delete". */
+.danger,
+.dangerSolid {
+  padding: 8px 16px;
+  border: 1px solid color-mix(in srgb, var(--bad) 55%, transparent);
+  border-radius: var(--radius);
+  background: var(--control-fill);
+  color: var(--bad);
+  font: 500 var(--size-s) / 1.4 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--fast),
+    color var(--fast),
+    opacity var(--fast);
+}
+
+.danger:hover {
+  background: color-mix(in srgb, var(--bad) 14%, var(--bg));
+}
+
+.dangerSolid {
+  border-color: var(--bad);
+  background: var(--bad);
+  color: #fff;
+}
+
+.dangerSolid:hover {
+  opacity: 0.86;
+}
+
+.danger:disabled,
+.dangerSolid:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* Forms */
 
 .field {
@@ -448,4 +485,135 @@
 
 .dialog .actions {
   justify-content: flex-end;
+}
+
+/* A centred card over the page; the page behind is dimmed and blurred. */
+.modal {
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 50%);
+}
+
+.modal::backdrop {
+  background: rgb(0 0 0 / 62%);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.modal[open] {
+  animation: modal-in 160ms ease-out;
+}
+
+.modal[open]::backdrop {
+  animation: backdrop-in 160ms ease-out;
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal[open],
+  .modal[open]::backdrop {
+    animation: none;
+  }
+}
+
+.modalCard {
+  position: relative;
+  padding: 36px 36px 32px;
+}
+
+.modalCard > h2 {
+  margin: 0;
+  font-size: var(--size-l);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-align: center;
+}
+
+/* The wordmark on top of every modal, as the logo on a login card. */
+.modalBrand {
+  margin: 0 0 20px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.05em;
+  text-align: center;
+}
+
+.modalLead {
+  margin: 8px 0 0;
+  color: var(--text-2);
+  font-size: var(--size-s);
+  line-height: 1.55;
+  text-align: center;
+}
+
+.modalClose {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-3);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--fast),
+    color var(--fast);
+}
+
+.modalClose:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.modalCard .field {
+  margin-top: 16px;
+}
+
+/* One wide main button, the alternatives under it. */
+.modalActions {
+  display: grid;
+  gap: 8px;
+  margin-top: 28px;
+}
+
+.modalActions > button {
+  width: 100%;
+  padding: 11px 16px;
+  font-size: var(--size-m);
+}
+
+.modalCard .error {
+  text-align: center;
+}
+
+@media (max-width: 480px) {
+  .modalCard {
+    padding: 32px 20px 24px;
+  }
 }

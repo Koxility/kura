@@ -4,6 +4,23 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-23
+
+### Added
+
+- **Invite by email** (*Settings → Administration → Users → Invite by email*): Kura mails a link; with it, the invited person chooses their own name and password. Email and role come from the invite. A link works once and for 7 days; *Revoke* ends it early, and so does deleting the admin who sent it. Needs a mail server; without one the button says so.
+- **Admins set a password** for someone (*Set password* on the user): the account is logged out everywhere and its API keys are deleted. Only when logged in with a password, not by API key.
+
+### Changed
+
+- **Modals instead of banners and dropdowns.** The one-time email question, *Add user*, *Invite by email*, *Set password* and every "Are you sure?" open as a centred card over the page, which is dimmed and blurred behind it.
+- **The reset mail is laid out like a classic account mail**: Kura wordmark, greeting, a short explanation with the link's validity in bold, one centred button, the address written out below for when the button does not work, and a footer, all in Kura's dark colours. The test mail and the new invite mail look the same.
+- **Buttons follow Kura's colours**: saving and creating are indigo, deleting is red and always asks first (users, API keys, invites, switching mail off).
+
+### Security
+
+- **Nobody signs up on their own.** Accounts come only from the first-run setup (while no account exists), from an admin, or from an admin's invite. `/register` without a valid invite creates nothing; guessing invite links is braked per address like reset requests.
+
 ## [1.4.0] - 2026-11-23
 
 ### Added
@@ -312,7 +329,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/Koxility/kura/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/Koxility/kura/compare/v1.3.5...v1.4.0
 [1.3.5]: https://github.com/Koxility/kura/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/Koxility/kura/compare/v1.3.3...v1.3.4

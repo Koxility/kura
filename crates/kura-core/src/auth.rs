@@ -345,7 +345,7 @@ pub(crate) fn network(address: IpAddr) -> IpAddr {
 }
 
 /// Returns the trimmed name.
-fn check_name(name: &str) -> Result<&str> {
+pub(crate) fn check_name(name: &str) -> Result<&str> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(CoreError::Invalid("the name must have 1 to 64 characters"));

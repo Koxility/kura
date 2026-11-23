@@ -4,6 +4,7 @@
 
 mod auth;
 mod downloaded;
+mod invites;
 mod jellyfin;
 mod library;
 mod mail;
@@ -22,6 +23,7 @@ use std::{
 
 use async_trait::async_trait;
 pub use auth::{API_KEY_PREFIX, SESSION_TTL, check_email};
+pub use invites::{INVITE_TTL, Registered};
 use kura_domain::{
     CalendarDay, Episode, EpisodeId, Genre, HosterLink, Job, JobState, Language, Library,
     NewEpisode, OutputFormat, RemovedTitle, Schedule, Series, SeriesSummary, Settings, SiteId,
@@ -78,6 +80,9 @@ pub enum CoreError {
     /// The mail server did not take a mail; the text is shown to the admin.
     #[error("{0}")]
     Mail(String),
+    /// Something with this name or address exists already; the text is shown.
+    #[error("{0}")]
+    Conflict(&'static str),
     /// Too many reset requests from one address; the number is the seconds to wait.
     #[error("too many reset requests; try again in {0} seconds")]
     TooManyResets(u64),

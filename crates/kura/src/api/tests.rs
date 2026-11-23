@@ -1303,3 +1303,225 @@ async fn the_email_prompt_is_shown_once() {
     let lee = server.log_in("/login", "lee", "correct horse").await;
     assert_eq!(server.get("/account", &lee).await.1["ask_email"], false);
 }
+
+fn invite_token(mail: &str) -> String {
+    let text = readable(mail);
+    let start = text.find("register#token=").expect("an invite link") + 15;
+    text[start..start + 64].to_owned()
+}
+
+#[tokio::test]
+async fn admins_set_a_password_for_someone_else() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let user = json!({ "name": "sam", "password": "correct horse", "role": "user" });
+    let (_, sam) = server.call(Method::POST, "/users", &admin, user).await;
+    let id = sam["id"].as_i64().unwrap();
+    let sam_session = server.log_in("/login", "sam", "correct horse").await;
+    let path = format!("/users/{id}/password");
+    let new = json!({ "password": "battery staple" });
+
+    assert_eq!(
+        server
+            .call(Method::PUT, &path, &sam_session, new.clone())
+            .await
+            .0,
+        403
+    );
+    let (_, key) = server
+        .call(
+            Method::POST,
+            "/account/keys",
+            &admin,
+            json!({ "name": "k" }),
+        )
+        .await;
+    let url = format!("{}/api/v1{path}", server.base);
+    let by_key = server
+        .http
+        .put(url)
+        .bearer_auth(key["secret"].as_str().unwrap())
+        .json(&new);
+    assert_eq!(by_key.send().await.unwrap().status(), 403);
+    let short = json!({ "password": "short" });
+    assert_eq!(server.call(Method::PUT, &path, &admin, short).await.0, 400);
+    assert_eq!(
+        server
+            .call(Method::PUT, "/users/999/password", &admin, new.clone())
+            .await
+            .0,
+        404
+    );
+
+    assert_eq!(server.call(Method::PUT, &path, &admin, new).await.0, 204);
+    assert_eq!(server.get("/account", &sam_session).await.0, 401);
+    server.log_in("/login", "sam", "battery staple").await;
+    // The admin's own session goes on.
+    assert_eq!(server.get("/account", &admin).await.0, 200);
+}
+
+#[tokio::test]
+async fn an_invite_creates_one_account_with_the_invited_email_and_role() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let to = json!({ "email": "kim@example.org", "role": "user" });
+
+    // Without a mail server, inviting says so.
+    assert_eq!(
+        server
+            .call(Method::POST, "/users/invite", &admin, to.clone())
+            .await
+            .0,
+        503
+    );
+    let (port, mut mails) = fake_mail_server().await;
+    server
+        .call(Method::PUT, "/admin/mail", &admin, plain_mail_server(port))
+        .await;
+
+    // Only admins invite.
+    let user = json!({ "name": "sam", "password": "correct horse", "role": "user", "email": "sam@example.org" });
+    server.call(Method::POST, "/users", &admin, user).await;
+    let sam = server.log_in("/login", "sam", "correct horse").await;
+    assert_eq!(
+        server
+            .call(Method::POST, "/users/invite", &sam, to.clone())
+            .await
+            .0,
+        403
+    );
+    assert_eq!(server.get("/invites", &sam).await.0, 403);
+    // An address an account has already.
+    let taken = json!({ "email": "SAM@example.org" });
+    assert_eq!(
+        server
+            .call(Method::POST, "/users/invite", &admin, taken)
+            .await
+            .0,
+        409
+    );
+
+    let (code, invite) = server.call(Method::POST, "/users/invite", &admin, to).await;
+    assert_eq!(code, 200, "{invite}");
+    let mail = next_mail(&mut mails).await;
+    assert!(mail.contains("To: kim@example.org"), "{mail}");
+    assert!(mail.contains("Subject: Kura: you are invited"), "{mail}");
+    let token = invite_token(&mail);
+    let (_, listed) = server.get("/invites", &admin).await;
+    assert_eq!(listed[0]["email"], "kim@example.org");
+
+    let check = |token: &str| {
+        server.call(
+            Method::POST,
+            "/register/check",
+            "",
+            json!({ "token": token }),
+        )
+    };
+    let (code, shown) = check(&token).await;
+    assert_eq!((code, &shown["email"]), (200, &json!("kim@example.org")));
+
+    // A taken name keeps the invite; a role or email in the body is ignored.
+    let register = |name: &str| {
+        let body = json!({ "token": token, "name": name, "password": "correct horse",
+            "role": "admin", "email": "other@example.org" });
+        server.call(Method::POST, "/register", "", body)
+    };
+    assert_eq!(register("Sam").await.0, 409);
+    let response = server
+        .request(Method::POST, "/register", "")
+        .json(
+            &json!({ "token": token, "name": "kim", "password": "correct horse", "role": "admin" }),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let cookie = response.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let (_, account) = server.get("/account", &cookie).await;
+    assert_eq!(account["role"], "user");
+    assert_eq!(account["email"], "kim@example.org");
+    assert_eq!(account["ask_email"], false);
+
+    // Once only.
+    assert_eq!(register("kim2").await.0, 400);
+    assert_eq!(check(&token).await.0, 400);
+    assert_eq!(server.get("/invites", &admin).await.1, json!([]));
+}
+
+#[tokio::test]
+async fn nobody_signs_up_without_an_admin() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let users = || async {
+        server
+            .get("/users", &admin)
+            .await
+            .1
+            .as_array()
+            .unwrap()
+            .len()
+    };
+
+    // Setup is closed once an account exists.
+    let again = json!({ "name": "intruder", "password": "correct horse" });
+    assert_eq!(server.call(Method::POST, "/setup", "", again).await.0, 409);
+    // No token, a made-up one, garbage: nothing is created.
+    for body in [
+        json!({ "name": "intruder", "password": "correct horse" }),
+        json!({ "token": "", "name": "intruder", "password": "correct horse" }),
+        json!({ "token": "0".repeat(64), "name": "intruder", "password": "correct horse" }),
+        json!({ "token": "' OR 1=1 --", "name": "intruder", "password": "correct horse" }),
+    ] {
+        let code = server
+            .call(Method::POST, "/register", "", body.clone())
+            .await
+            .0;
+        assert!(code == 400 || code == 422, "{body}: {code}");
+    }
+    // Creating users directly is for admins.
+    let direct = json!({ "name": "intruder", "password": "correct horse", "role": "admin" });
+    assert_eq!(
+        server
+            .call(Method::POST, "/users", "", direct.clone())
+            .await
+            .0,
+        401
+    );
+    assert_eq!(users().await, 1);
+
+    // A revoked invite is dead.
+    let (port, mut mails) = fake_mail_server().await;
+    server
+        .call(Method::PUT, "/admin/mail", &admin, plain_mail_server(port))
+        .await;
+    let (_, invite) = server
+        .call(
+            Method::POST,
+            "/users/invite",
+            &admin,
+            json!({ "email": "lee@example.org" }),
+        )
+        .await;
+    let token = invite_token(&next_mail(&mut mails).await);
+    let path = format!("/invites/{}", invite["id"]);
+    assert_eq!(
+        server
+            .call(Method::DELETE, &path, &admin, Value::Null)
+            .await
+            .0,
+        204
+    );
+    let body = json!({ "token": token, "name": "lee", "password": "correct horse" });
+    assert_eq!(
+        server.call(Method::POST, "/register", "", body).await.0,
+        400
+    );
+    assert_eq!(users().await, 1);
+}

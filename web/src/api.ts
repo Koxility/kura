@@ -96,6 +96,15 @@ export interface UserEntry extends User {
   email: string | null;
 }
 
+/** An invitation an admin sent; its link creates an account with this email and role. */
+export interface Invite {
+  id: number;
+  email: string;
+  role: Role;
+  created_at: number;
+  expires_at: number;
+}
+
 export type MailEncryption = "starttls" | "tls" | "none";
 
 /** The mail server for password reset mails. The password itself never comes back. */

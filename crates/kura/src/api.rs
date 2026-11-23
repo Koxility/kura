@@ -67,6 +67,8 @@ fn router(core: Arc<Core>) -> Router {
         .route("/logout", post(logout))
         .route("/password-reset", post(request_reset))
         .route("/password-reset/confirm", post(confirm_reset))
+        .route("/register/check", post(check_invite))
+        .route("/register", post(register))
         .route("/account", get(account))
         .route("/account/password", put(change_password))
         .route("/account/name", put(rename))
@@ -118,6 +120,10 @@ fn router(core: Arc<Core>) -> Router {
         .route("/users", get(users).post(create_user))
         .route("/users/{id}", delete(delete_user))
         .route("/users/{id}/email", put(set_user_email))
+        .route("/users/{id}/password", put(set_user_password))
+        .route("/users/invite", post(invite))
+        .route("/invites", get(invites))
+        .route("/invites/{id}", delete(revoke_invite))
         .fallback(|| async { ApiError(StatusCode::NOT_FOUND, "no such endpoint".into()) })
         // Answers change with every download; neither the browser nor a proxy may keep one.
         .layer(SetResponseHeaderLayer::if_not_present(
@@ -194,6 +200,7 @@ impl From<CoreError> for ApiError {
                 StatusCode::TOO_MANY_REQUESTS
             }
             CoreError::MailNotSetUp => StatusCode::SERVICE_UNAVAILABLE,
+            CoreError::Conflict(_) => StatusCode::CONFLICT,
             CoreError::Mail(_) => StatusCode::BAD_GATEWAY,
             CoreError::Jellyfin(_) => StatusCode::BAD_GATEWAY,
             // The site did not answer or changed its pages.
@@ -475,6 +482,74 @@ async fn confirm_reset(State(core): App, Json(form): Json<ResetConfirm>) -> ApiR
 }
 
 #[derive(Deserialize)]
+struct InviteToken {
+    token: String,
+}
+
+/// What an invite link stands for, so the page can show the address before the form.
+async fn check_invite(
+    State(core): App,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    Extension(proxies): Proxies,
+    headers: HeaderMap,
+    Json(form): Json<InviteToken>,
+) -> ApiResult<Json<Value>> {
+    let client = proxies.client(from.ip(), &headers);
+    match core.check_invite(&form.token, client.address)? {
+        Some(invite) => Ok(Json(json!({ "email": invite.email, "role": invite.role }))),
+        None => Err(invalid_invite()),
+    }
+}
+
+fn invalid_invite() -> ApiError {
+    error(
+        StatusCode::BAD_REQUEST,
+        "this invite link is invalid, was already used or has expired; ask an admin for a new one",
+    )
+}
+
+/// Only these fields count: email and role come from the invite, whatever else is sent.
+#[derive(Deserialize)]
+struct Registration {
+    token: String,
+    name: String,
+    password: String,
+}
+
+/// Creates the account an invite stands for and logs it in. The only way to an account without
+/// an admin at hand, and only with a link an admin sent.
+async fn register(
+    State(core): App,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    Extension(proxies): Proxies,
+    headers: HeaderMap,
+    Json(form): Json<Registration>,
+) -> ApiResult<Response> {
+    let client = proxies.client(from.ip(), &headers);
+    let registered = core
+        .register(&form.token, &form.name, &form.password, client.address)
+        .await?;
+    let user = match registered {
+        kura_core::Registered::Created(user) => user,
+        kura_core::Registered::NameTaken => {
+            return Err(error(StatusCode::CONFLICT, "this name is taken"));
+        }
+        kura_core::Registered::Invalid => return Err(invalid_invite()),
+    };
+    let logged_in = core
+        .login(&user.name, &form.password, client.address)
+        .await?;
+    let Some((user, token)) = logged_in else {
+        return Err(error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "the new account could not log in",
+        ));
+    };
+    let cookie = session_cookie(&token, SESSION_TTL, client.https);
+    Ok((cookie, Json(user)).into_response())
+}
+
+#[derive(Deserialize)]
 struct NewPassword {
     current: String,
     new: String,
@@ -722,6 +797,60 @@ async fn set_user_email(
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(error(StatusCode::NOT_FOUND, "no such user"))
+    }
+}
+
+#[derive(Deserialize)]
+struct PasswordForm {
+    password: String,
+}
+
+/// An admin sets someone's password, logged in with their own password, not by API key.
+async fn set_user_password(
+    State(core): App,
+    session: Session,
+    Path(id): Path<i64>,
+    Json(form): Json<PasswordForm>,
+) -> ApiResult<StatusCode> {
+    if session.user.role != Role::Admin {
+        return Err(error(StatusCode::FORBIDDEN, "only an admin can do this"));
+    }
+    in_browser(&session)?;
+    if core.set_user_password(id, &form.password).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(error(StatusCode::NOT_FOUND, "no such user"))
+    }
+}
+
+#[derive(Deserialize)]
+struct InviteForm {
+    email: String,
+    #[serde(default = "user_role")]
+    role: Role,
+}
+
+fn user_role() -> Role {
+    Role::User
+}
+
+async fn invite(
+    State(core): App,
+    Admin(admin): Admin,
+    Json(form): Json<InviteForm>,
+) -> ApiResult<Json<kura_domain::Invite>> {
+    Ok(Json(core.invite(&form.email, form.role, &admin).await?))
+}
+
+async fn invites(State(core): App, _: Admin) -> ApiResult<Json<Vec<kura_domain::Invite>>> {
+    Ok(Json(core.invites()?))
+}
+
+async fn revoke_invite(State(core): App, _: Admin, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+    if core.revoke_invite(id)? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(error(StatusCode::NOT_FOUND, "no such invite"))
     }
 }
 

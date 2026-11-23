@@ -8,6 +8,7 @@ import {
   type Backdrop,
   api,
   hosterNames,
+  type Invite,
   type Jellyfin as JellyfinSettings,
   type Language,
   type Library,
@@ -22,10 +23,12 @@ import {
   sites,
   supportedHosters,
   songsQuery,
+  type Role,
   type Theme,
   type User,
   type UserEntry,
 } from "../api";
+import { Confirm, Modal } from "../Modal";
 import { pieceFromLink, pieceTitle } from "../ThemeEffects";
 import ui from "../ui.module.css";
 import styles from "./Settings.module.css";
@@ -798,7 +801,7 @@ function NameForm({ account, onSaved }: { account: Account; onSaved: (next: Acco
           required
         />
       </label>
-      <button className={ui.button} disabled={rename.isPending || name.trim() === account.name}>
+      <button className={ui.primary} disabled={rename.isPending || name.trim() === account.name}>
         Change name
       </button>
       <Outcome mutation={rename} done="Name changed." />
@@ -852,7 +855,7 @@ function EmailForm({ account, onSaved }: { account: Account; onSaved: (next: Acc
         </label>
       )}
       <div className={`${ui.actions} ${styles.left}`}>
-        <button className={ui.button} disabled={save.isPending || !changed}>
+        <button className={ui.primary} disabled={save.isPending || !changed}>
           Save email
         </button>
         <Outcome mutation={save} done="Saved. A password reset link goes here." />
@@ -927,7 +930,7 @@ function PasswordForm() {
         </p>
       )}
       <div className={`${ui.actions} ${styles.left}`}>
-        <button className={ui.button} disabled={change.isPending || mismatch}>
+        <button className={ui.primary} disabled={change.isPending || mismatch}>
           Change password
         </button>
         <Outcome
@@ -945,6 +948,7 @@ function ApiKeys() {
   const keys = useQuery({ queryKey: ["api-keys"], queryFn: () => api<ApiKey[]>("/account/keys") });
   const refresh = () => client.invalidateQueries({ queryKey: ["api-keys"] });
   const [name, setName] = useState("");
+  const [deleting, setDeleting] = useState<ApiKey | null>(null);
   const create = useMutation({
     mutationFn: () => api<{ key: ApiKey; secret: string }>("/account/keys", "POST", { name }),
     onSuccess: () => {
@@ -967,6 +971,18 @@ function ApiKeys() {
         what your account can, except change the password or the keys. Changing your password
         deletes every key.
       </p>
+      {deleting && (
+        <Confirm
+          title={`Delete the key “${deleting.name}”?`}
+          text="Programs using it stop working at once."
+          action="Delete key"
+          danger
+          pending={remove.isPending}
+          error={remove.error?.message}
+          onConfirm={() => remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) })}
+          onClose={() => setDeleting(null)}
+        />
+      )}
       {keys.data && keys.data.length > 0 && (
         <ul className={`${ui.list} ${styles.top}`}>
           {keys.data.map((key) => (
@@ -975,14 +991,7 @@ function ApiKeys() {
               <span className={ui.muted}>
                 {key.last_used_at ? `Used ${date(key.last_used_at)}` : `Created ${date(key.created_at)}`}
               </span>
-              <button
-                type="button"
-                className={ui.ghost}
-                onClick={() => {
-                  if (confirm(`Delete the key “${key.name}”? Programs using it stop working.`))
-                    remove.mutate(key.id);
-                }}
-              >
+              <button type="button" className={ui.danger} onClick={() => setDeleting(key)}>
                 Delete
               </button>
             </li>
@@ -1007,7 +1016,7 @@ function ApiKeys() {
             required
           />
         </label>
-        <button className={ui.button} disabled={create.isPending}>
+        <button className={ui.primary} disabled={create.isPending}>
           Create key
         </button>
       </form>
@@ -1401,31 +1410,44 @@ function Songs() {
   );
 }
 
-/** Every account: add one, set its email for password resets, delete it. Each row opens to
- *  its actions, so the list stays short to read. */
+/** Every account and the invites that are out. Adding, inviting, setting a password and
+ *  deleting each happen in a centred modal of their own. */
 function AdminUsers({ me }: { me: User }) {
   const client = useQueryClient();
   const users = useQuery({ queryKey: ["users"], queryFn: () => api<UserEntry[]>("/users") });
   const mail = useQuery({ queryKey: ["mail"], queryFn: () => api<MailSettings>("/admin/mail") });
-  const refresh = () => client.invalidateQueries({ queryKey: ["users"] });
-  const add = useMutation({
-    mutationFn: (form: Record<string, FormDataEntryValue>) => api("/users", "POST", form),
-    onSuccess: refresh,
-  });
-
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    add.mutate(Object.fromEntries(new FormData(form)), { onSuccess: () => form.reset() });
-  }
+  const invites = useQuery({ queryKey: ["invites"], queryFn: () => api<Invite[]>("/invites") });
+  const refresh = () => {
+    client.invalidateQueries({ queryKey: ["users"] });
+    client.invalidateQueries({ queryKey: ["invites"] });
+  };
+  const [open, setOpen] = useState<"add" | "invite" | null>(null);
+  const mailOn = mail.data?.enabled ?? false;
 
   return (
     <section className={styles.form}>
       <p className={styles.hint}>
-        Admins manage settings, users and requests; users browse and ask for titles. A user with
-        an email address can reset a forgotten password
-        {mail.data?.enabled ? "." : " once a mail server is set up under Mail."}
+        Admins manage settings, users and requests; users browse and ask for titles. Nobody can
+        sign up on their own: add an account here, or invite someone by email.
       </p>
+      <div className={`${ui.actions} ${styles.left}`}>
+        <button type="button" className={ui.primary} onClick={() => setOpen("add")}>
+          Add user
+        </button>
+        <button
+          type="button"
+          className={ui.button}
+          disabled={!mailOn}
+          onClick={() => setOpen("invite")}
+        >
+          Invite by email
+        </button>
+        {!mailOn && mail.data && (
+          <span className={styles.faint}>
+            Inviting needs mail: <NavLink to="/settings/administration/mail">set it up</NavLink>.
+          </span>
+        )}
+      </div>
       {users.error && (
         <p className={ui.error} role="alert">
           {users.error.message}
@@ -1439,67 +1461,45 @@ function AdminUsers({ me }: { me: User }) {
         ))}
       </ul>
 
-      <details className={styles.expander}>
-        <summary className={styles.summary}>Add a user</summary>
-        <form className={styles.expanded} onSubmit={onSubmit}>
-          <label className={ui.field}>
-            Name
-            <input className={ui.input} name="name" autoComplete="off" required />
-          </label>
-          <label className={ui.field}>
-            <span>
-              Email <span className={styles.faint}>(optional, for password reset)</span>
-            </span>
-            <input className={ui.input} name="email" type="email" autoComplete="off" />
-          </label>
-          <label className={ui.field}>
-            Password
-            <input
-              className={ui.input}
-              name="password"
-              type="password"
-              autoComplete="new-password"
-              minLength={8}
-              required
-            />
-          </label>
-          <label className={ui.field}>
-            Role
-            <select className={ui.input} name="role" defaultValue="user">
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
-            </select>
-          </label>
-          <div className={`${ui.actions} ${styles.left}`}>
-            <button className={ui.primary} disabled={add.isPending}>
-              Add user
-            </button>
-            <Outcome mutation={add} done="Added." />
-          </div>
-        </form>
-      </details>
+      {invites.data && invites.data.length > 0 && (
+        <>
+          <h3 className={styles.subheading}>Invites that are out</h3>
+          <ul className={ui.list}>
+            {invites.data.map((invite) => (
+              <InviteRow key={invite.id} invite={invite} onChanged={refresh} />
+            ))}
+          </ul>
+        </>
+      )}
+
+      {open === "add" && <AddUser onClose={() => setOpen(null)} onAdded={refresh} />}
+      {open === "invite" && <InviteUser onClose={() => setOpen(null)} onSent={refresh} />}
     </section>
   );
 }
 
 function UserRow({ user, me, onChanged }: { user: UserEntry; me: User; onChanged: () => void }) {
   const [email, setEmail] = useState(user.email ?? "");
+  const [open, setOpen] = useState<"password" | "delete" | null>(null);
   const save = useMutation({
     mutationFn: () => api(`/users/${user.id}/email`, "PUT", { email }),
     onSuccess: onChanged,
   });
   const remove = useMutation({
     mutationFn: () => api(`/users/${user.id}`, "DELETE"),
-    onSuccess: onChanged,
+    onSuccess: () => {
+      setOpen(null);
+      onChanged();
+    },
   });
-  const failure = remove.error;
+  const self = user.id === me.id;
 
   return (
     <details className={styles.userRow}>
       <summary className={styles.userSummary}>
         <span className={ui.grow}>
           {user.name}
-          {user.id === me.id && <span className={styles.faint}> (you)</span>}
+          {self && <span className={styles.faint}> (you)</span>}
         </span>
         <span className={styles.userEmail}>{user.email ?? "no email"}</span>
         <span className={ui.muted}>{user.role === "admin" ? "Admin" : "User"}</span>
@@ -1524,7 +1524,7 @@ function UserRow({ user, me, onChanged }: { user: UserEntry; me: User; onChanged
             />
           </label>
           <button
-            className={ui.button}
+            className={ui.primary}
             disabled={save.isPending || email.trim() === (user.email ?? "")}
           >
             Save email
@@ -1532,25 +1532,324 @@ function UserRow({ user, me, onChanged }: { user: UserEntry; me: User; onChanged
           <Outcome mutation={save} done="Saved." />
         </form>
         <div className={`${ui.actions} ${styles.left}`}>
+          {!self && (
+            <button type="button" className={ui.button} onClick={() => setOpen("password")}>
+              Set password
+            </button>
+          )}
           <button
             type="button"
-            className={ui.ghost}
-            disabled={user.id === me.id || remove.isPending}
-            title={user.id === me.id ? "You cannot delete your own account" : undefined}
-            onClick={() => {
-              if (confirm(`Delete ${user.name}? This cannot be undone.`)) remove.mutate();
-            }}
+            className={ui.danger}
+            disabled={self}
+            title={self ? "You cannot delete your own account" : undefined}
+            onClick={() => setOpen("delete")}
           >
-            Delete {user.name}
+            Delete user
           </button>
         </div>
-        {failure && (
+      </div>
+      {open === "password" && <SetPassword user={user} onClose={() => setOpen(null)} />}
+      {open === "delete" && (
+        <Confirm
+          title={`Delete ${user.name}?`}
+          text={`${user.name} is logged out everywhere, and their requests and API keys are deleted. This cannot be undone.`}
+          action="Delete user"
+          danger
+          pending={remove.isPending}
+          error={remove.error?.message}
+          onConfirm={() => remove.mutate()}
+          onClose={() => setOpen(null)}
+        />
+      )}
+    </details>
+  );
+}
+
+/** The two password fields every "choose a password" form has. */
+function NewPassword({
+  password,
+  again,
+  onPassword,
+  onAgain,
+}: {
+  password: string;
+  again: string;
+  onPassword: (value: string) => void;
+  onAgain: (value: string) => void;
+}) {
+  const mismatch = again !== "" && again !== password;
+  return (
+    <>
+      <label className={ui.field}>
+        Password
+        <input
+          className={ui.input}
+          type="password"
+          value={password}
+          onChange={(event) => onPassword(event.target.value)}
+          autoComplete="new-password"
+          minLength={8}
+          required
+        />
+      </label>
+      <label className={ui.field}>
+        Password again
+        <input
+          className={ui.input}
+          type="password"
+          value={again}
+          onChange={(event) => onAgain(event.target.value)}
+          autoComplete="new-password"
+          aria-invalid={mismatch}
+          required
+        />
+      </label>
+      {mismatch && (
+        <p className={ui.error} role="alert">
+          The passwords differ.
+        </p>
+      )}
+    </>
+  );
+}
+
+function RolePicker({ role, onChange }: { role: Role; onChange: (role: Role) => void }) {
+  return (
+    <div className={ui.field}>
+      Role
+      <div className={`${ui.segmented} ${styles.roles}`} role="group" aria-label="Role">
+        {(["user", "admin"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            className={ui.segment}
+            aria-pressed={role === value}
+            onClick={() => onChange(value)}
+          >
+            {value === "admin" ? "Admin" : "User"}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AddUser({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+  const [form, setForm] = useState({ name: "", email: "", password: "", again: "" });
+  const [role, setRole] = useState<Role>("user");
+  const change = (part: Partial<typeof form>) => setForm({ ...form, ...part });
+  const add = useMutation({
+    mutationFn: () =>
+      api("/users", "POST", { name: form.name, email: form.email, password: form.password, role }),
+    onSuccess: () => {
+      onAdded();
+      onClose();
+    },
+  });
+  const mismatch = form.again !== "" && form.again !== form.password;
+  return (
+    <Modal
+      title="Add a user"
+      lead="The account can log in right away with this name and password."
+      onClose={onClose}
+      locked={add.isPending}
+    >
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!mismatch) add.mutate();
+        }}
+      >
+        <label className={ui.field}>
+          Name
+          <input
+            className={ui.input}
+            value={form.name}
+            onChange={(event) => change({ name: event.target.value })}
+            autoComplete="off"
+            required
+            autoFocus
+          />
+        </label>
+        <label className={ui.field}>
+          <span>
+            Email <span className={styles.faint}>(optional, for password reset)</span>
+          </span>
+          <input
+            className={ui.input}
+            type="email"
+            value={form.email}
+            onChange={(event) => change({ email: event.target.value })}
+            autoComplete="off"
+            placeholder="name@example.org"
+          />
+        </label>
+        <NewPassword
+          password={form.password}
+          again={form.again}
+          onPassword={(password) => change({ password })}
+          onAgain={(again) => change({ again })}
+        />
+        <RolePicker role={role} onChange={setRole} />
+        {add.isError && (
           <p className={ui.error} role="alert">
-            {failure.message}
+            {add.error.message}
           </p>
         )}
-      </div>
-    </details>
+        <div className={ui.modalActions}>
+          <button className={ui.primary} disabled={add.isPending || mismatch}>
+            Create account
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function SetPassword({ user, onClose }: { user: UserEntry; onClose: () => void }) {
+  const [password, setPassword] = useState("");
+  const [again, setAgain] = useState("");
+  const set = useMutation({
+    mutationFn: () => api(`/users/${user.id}/password`, "PUT", { password }),
+  });
+  const mismatch = again !== "" && again !== password;
+  return (
+    <Modal
+      title={`New password for ${user.name}`}
+      lead={`${user.name} is logged out everywhere and their API keys are deleted. Tell them the new password yourself.`}
+      onClose={onClose}
+      locked={set.isPending}
+    >
+      {set.isSuccess ? (
+        <>
+          <p className={styles.done} role="status">
+            The password of {user.name} is set.
+          </p>
+          <div className={ui.modalActions}>
+            <button type="button" className={ui.primary} onClick={onClose} autoFocus>
+              Done
+            </button>
+          </div>
+        </>
+      ) : (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!mismatch) set.mutate();
+          }}
+        >
+          <NewPassword
+            password={password}
+            again={again}
+            onPassword={setPassword}
+            onAgain={setAgain}
+          />
+          {set.isError && (
+            <p className={ui.error} role="alert">
+              {set.error.message}
+            </p>
+          )}
+          <div className={ui.modalActions}>
+            <button className={ui.primary} disabled={set.isPending || mismatch}>
+              Set password
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
+function InviteUser({ onClose, onSent }: { onClose: () => void; onSent: () => void }) {
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<Role>("user");
+  const send = useMutation({
+    mutationFn: () => api<Invite>("/users/invite", "POST", { email, role }),
+    onSuccess: onSent,
+  });
+  return (
+    <Modal
+      title="Invite by email"
+      lead="Kura sends a link; with it, they choose their own name and password. It works once and for 7 days."
+      onClose={onClose}
+      locked={send.isPending}
+    >
+      {send.isSuccess ? (
+        <>
+          <p className={styles.done} role="status">
+            Invite sent to {send.data.email}.
+          </p>
+          <div className={ui.modalActions}>
+            <button type="button" className={ui.primary} onClick={onClose} autoFocus>
+              Done
+            </button>
+          </div>
+        </>
+      ) : (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            send.mutate();
+          }}
+        >
+          <label className={ui.field}>
+            Email
+            <input
+              className={ui.input}
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="name@example.org"
+              autoComplete="off"
+              required
+              autoFocus
+            />
+          </label>
+          <RolePicker role={role} onChange={setRole} />
+          {send.isError && (
+            <p className={ui.error} role="alert">
+              {send.error.message}
+            </p>
+          )}
+          <div className={ui.modalActions}>
+            <button className={ui.primary} disabled={send.isPending}>
+              {send.isPending ? "Sending…" : "Send invite"}
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
+function InviteRow({ invite, onChanged }: { invite: Invite; onChanged: () => void }) {
+  const [asking, setAsking] = useState(false);
+  const revoke = useMutation({
+    mutationFn: () => api(`/invites/${invite.id}`, "DELETE"),
+    onSuccess: onChanged,
+  });
+  const until = new Date(invite.expires_at * 1000).toLocaleDateString();
+  return (
+    <li className={`${ui.row} ${styles.entry}`}>
+      <span className={ui.grow}>{invite.email}</span>
+      <span className={styles.faint}>until {until}</span>
+      <span className={ui.muted}>{invite.role === "admin" ? "Admin" : "User"}</span>
+      <button type="button" className={ui.danger} onClick={() => setAsking(true)}>
+        Revoke
+      </button>
+      {asking && (
+        <Confirm
+          title="Revoke this invite?"
+          text={`The link sent to ${invite.email} stops working.`}
+          action="Revoke invite"
+          danger
+          pending={revoke.isPending}
+          error={revoke.error?.message}
+          onConfirm={() => revoke.mutate()}
+          onClose={() => setAsking(false)}
+        />
+      )}
+    </li>
   );
 }
 
@@ -1598,6 +1897,7 @@ function MailForm({
     onSuccess: onSaved,
   });
   const usernameKept = draft.username === stored.username;
+  const [askingOff, setAskingOff] = useState(false);
 
   function encryption(next: MailEncryption) {
     // The usual port follows, unless someone chose another one.
@@ -1749,11 +2049,9 @@ function MailForm({
           {stored.host && (
             <button
               type="button"
-              className={ui.ghost}
+              className={ui.danger}
               disabled={off.isPending}
-              onClick={() => {
-                if (confirm("Switch mail off and forget the mail server?")) off.mutate();
-              }}
+              onClick={() => setAskingOff(true)}
             >
               Switch mail off
             </button>
@@ -1767,6 +2065,18 @@ function MailForm({
         )}
       </form>
       {stored.enabled && <TestMail />}
+      {askingOff && (
+        <Confirm
+          title="Switch mail off?"
+          text="Kura forgets the mail server and its password. Password reset and invites stop until mail is set up again."
+          action="Switch mail off"
+          danger
+          pending={off.isPending}
+          error={off.error?.message}
+          onConfirm={() => off.mutate(undefined, { onSuccess: () => setAskingOff(false) })}
+          onClose={() => setAskingOff(false)}
+        />
+      )}
     </section>
   );
 }
@@ -1797,7 +2107,7 @@ function TestMail() {
             required
           />
         </label>
-        <button className={ui.button} disabled={send.isPending}>
+        <button className={ui.primary} disabled={send.isPending}>
           {send.isPending ? "Sending…" : "Send"}
         </button>
         <Outcome mutation={send} done={`Sent. Look in the inbox of ${address}.`} />

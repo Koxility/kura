@@ -28,6 +28,8 @@ Sites are `aniworld` or `serienstream`; languages are `german_dub`, `german_sub`
 | `GET /status` | anyone | The caller (`user`, or `null`), enabled `sites`, `defaults`; `version`, `commit` and `latest_version` only for a logged-in caller (`null` otherwise) |
 | `GET /account` | user | Own name, role, email, theme, and `ask_email` (the web app asks once for an email) |
 | `POST /password-reset` | anyone | `{ name }` (a name or an email): answers `202` the same for every name; `503` without a mail server, `429` when asked too often |
+| `POST /register/check` | anyone | `{ token }` from an invite link (`…/register#token=…`): the invited `email` and `role`, or `400` |
+| `POST /register` | anyone with an invite | `{ token, name, password }`: creates the account with the invite's email and role and logs it in; `400` for a used or expired invite, `409` for a taken name. There is no sign-up without an invite. |
 | `POST /password-reset/confirm` | anyone | `{ token, password }` from the reset link (`…/reset-password#token=…`): `204`, or `400` for a used or expired link |
 | `GET /search?q=…&site=…` | user | Titles matching the text, on one site or all |
 | `GET /new/{site}` · `GET /popular/{site}` | user | Title lists |

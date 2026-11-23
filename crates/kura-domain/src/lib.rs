@@ -287,6 +287,18 @@ pub struct UserEntry {
     pub email: Option<String>,
 }
 
+/// An invitation an admin sent: whoever opens its link creates an account with this email and
+/// role. Only the hash of the link's token is stored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Invite {
+    pub id: i64,
+    pub email: String,
+    pub role: Role,
+    /// Unix seconds.
+    pub created_at: i64,
+    pub expires_at: i64,
+}
+
 /// The mail server Kura sends password reset mails through, set by an admin. Kept apart from
 /// [`Settings`], so the exported configuration never holds the mail password.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

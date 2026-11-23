@@ -99,7 +99,7 @@ Per account:
 
 The menu opens to four parts:
 
-- **Users**: every account with its role and email. Click one to set its email (for password reset) or delete it; **Add a user** opens a form for name, optional email, password and role. See [[Roles and Requests|Roles-and-Requests]].
+- **Users**: every account with its role and email. Click one to set its email (for password reset), **Set password** for it (it is logged out everywhere, its API keys are deleted) or **Delete user** (asks first). **Add user** opens a form for name, optional email, password and role. **Invite by email** sends a link with which the person chooses their own name and password; email and role come from the invite, the link works once and for 7 days, and open invites are listed with *Revoke*. Nobody can sign up without an admin. See [[Roles and Requests|Roles-and-Requests]].
 - **Mail**: the mail server Kura sends password reset links through. Until one is set up, the login page offers no *Forgot password?* (see below).
 - **Configuration**: export / import of all settings, libraries and Auto-Sync exclusions as one JSON file. Accounts, passwords and the mail server are not included.
 - **Network**: shows the public address the server reaches the internet from, e.g. to confirm a VPN. It asks api.ipify.org, only when you press the button.

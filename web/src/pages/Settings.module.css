@@ -459,3 +459,20 @@ details[open] > .userSummary::before {
   font-size: var(--size-s);
   overflow-wrap: anywhere;
 }
+
+/* User / Admin in the add and invite modals. */
+.roles {
+  margin-inline: 0;
+}
+
+/* The outcome inside a modal, e.g. "Invite sent". */
+.done {
+  margin: 20px 0 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text-2);
+  font-size: var(--size-s);
+  text-align: center;
+}

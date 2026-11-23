@@ -21,9 +21,11 @@ import { LibraryPage } from "./pages/Library";
 import { LibrarySetup } from "./pages/LibrarySetup";
 import { Queue } from "./pages/Queue";
 import { Requests } from "./pages/Requests";
+import { Register } from "./pages/Register";
 import { ResetPassword } from "./pages/Reset";
 import { SeriesPage } from "./pages/SeriesPage";
 import { SettingsPage } from "./pages/Settings";
+import { Modal } from "./Modal";
 import { ThemeEffects } from "./ThemeEffects";
 import ui from "./ui.module.css";
 
@@ -42,6 +44,8 @@ export function App() {
   const { pathname } = useLocation();
   // A reset link opens this page whether or not someone is logged in on this device.
   if (pathname === "/reset-password") return <ResetPassword />;
+  // An invite link, likewise; without a valid invite the page offers nothing.
+  if (pathname === "/register") return <Register />;
   if (status.isPending) return null;
   if (status.isError) {
     return (
@@ -134,8 +138,8 @@ function Shell({ status }: { status: Status }) {
   );
 }
 
-/** Asks once, after login, for an email address to send a reset link to. Optional: "Not now"
- *  ends it for good, on every device. Right after logging in no password is needed; later the
+/** Asks once, after login, in a centred modal, for an email address to send a reset link to.
+ *  Optional: "Not now" (or closing it) ends it for good, on every device. Right after logging in no password is needed; later the
  *  server asks for it and the card shows the field. */
 function EmailPrompt({ mailOn }: { mailOn: boolean }) {
   const client = useQueryClient();
@@ -168,57 +172,63 @@ function EmailPrompt({ mailOn }: { mailOn: boolean }) {
   }
 
   return (
-    <form className={styles.prompt} onSubmit={onSubmit} aria-labelledby="email-prompt">
-      <div className={styles.promptText}>
-        <h2 id="email-prompt">Add an email address?</h2>
-        <p>
-          {mailOn
-            ? "If you forget your password, a link to choose a new one is sent there."
-            : "If you forget your password, a link to choose a new one can be sent there once an admin sets up mail."}{" "}
-          Optional; you can also add it later under Settings → Account.
-        </p>
-      </div>
-      <div className={styles.promptFields}>
-        <input
-          className={ui.input}
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="you@example.org"
-          autoComplete="email"
-          aria-label="Email"
-          required
-        />
-        {needsPassword && (
+    <Modal
+      title="Add an email address"
+      lead={
+        mailOn
+          ? "If you forget your password, a link to choose a new one is sent there. Optional; you can add it later under Settings → Account."
+          : "If you forget your password, a link to choose a new one can be sent there once an admin sets up mail. Optional; you can add it later under Settings → Account."
+      }
+      onClose={() => skip.mutate()}
+      locked={save.isPending || skip.isPending}
+    >
+      <form onSubmit={onSubmit}>
+        <label className={ui.field}>
+          Email
           <input
             className={ui.input}
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Current password"
-            autoComplete="current-password"
-            aria-label="Current password"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.org"
+            autoComplete="email"
             required
+            autoFocus
           />
+        </label>
+        {needsPassword && (
+          <label className={ui.field}>
+            Current password
+            <input
+              className={ui.input}
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </label>
         )}
-        <button className={ui.primary} disabled={save.isPending}>
-          Save
-        </button>
-        <button
-          type="button"
-          className={ui.ghost}
-          disabled={skip.isPending}
-          onClick={() => skip.mutate()}
-        >
-          Not now
-        </button>
-      </div>
-      {(save.isError || skip.isError) && (
-        <p className={ui.error} role="alert">
-          {(save.error ?? skip.error)?.message}
-        </p>
-      )}
-    </form>
+        {(save.isError || skip.isError) && (
+          <p className={ui.error} role="alert">
+            {(save.error ?? skip.error)?.message}
+          </p>
+        )}
+        <div className={ui.modalActions}>
+          <button className={ui.primary} disabled={save.isPending}>
+            Save email
+          </button>
+          <button
+            type="button"
+            className={ui.ghost}
+            disabled={skip.isPending}
+            onClick={() => skip.mutate()}
+          >
+            Not now
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

@@ -78,8 +78,9 @@ impl Core {
             preview: "Kura can send mails.".into(),
             heading: "Mail works".into(),
             paragraphs: vec![
-                "This is a test mail from Kura. Password reset links will be sent this way.".into(),
+                "This is a test mail from Kura. Password reset links and invitations are sent the same way.".into(),
             ],
+            emphasis: None,
             button: Some(("Open Kura".into(), mail.public_url.clone())),
             after: vec![],
         };
@@ -166,6 +167,11 @@ impl Core {
         Ok(true)
     }
 
+    /// The per-address brake for everything a mailed link opens: reset requests, invites.
+    pub(crate) fn count_link_try(&self, from: IpAddr) -> Result<()> {
+        self.count_reset_request(from)
+    }
+
     /// The per-address brake for reset requests, like the one for logins.
     fn count_reset_request(&self, from: IpAddr) -> Result<()> {
         self.count_try(&(crate::auth::network(from), RESET_BRAKE.to_owned()))
@@ -245,24 +251,26 @@ pub(crate) fn address(text: &str) -> Result<Address> {
         .map_err(|_| CoreError::Invalid("this does not look like an email address"))
 }
 
-async fn send_reset(mail: &Mail, user: &UserEntry, email: &str, link: &str) -> Result<()> {
+pub(crate) async fn send_reset(
+    mail: &Mail,
+    user: &UserEntry,
+    email: &str,
+    link: &str,
+) -> Result<()> {
     let to = Mailbox::new(Some(user.name.clone()), address(email)?);
     let minutes = RESET_TTL / 60;
     let content = Content {
         subject: "Kura: reset your password".into(),
         preview: "A link to choose a new password for Kura.".into(),
-        heading: "Reset your password".into(),
+        heading: format!("Hi {},", user.name),
         paragraphs: vec![
-            format!("Hello {},", user.name),
-            "someone asked to reset the password of your Kura account. Choose a new one here:"
-                .into(),
+            "Someone asked to reset the password of your Kura account. Use the button below to choose a new one.".into(),
         ],
-        button: Some(("Choose a new password".into(), link.to_owned())),
+        emphasis: Some(format!("The link works once and for the next {minutes} minutes.")),
+        button: Some(("Reset password".into(), link.to_owned())),
         after: vec![
-            format!(
-                "The link works once and for {minutes} minutes. Afterwards you are logged out everywhere, and the account's API keys are deleted."
-            ),
-            "If you did not ask for this, ignore this mail: your password stays as it is.".into(),
+            "Afterwards you are logged out everywhere, and the account's API keys are deleted.".into(),
+            "Did not ask for this? Ignore this mail; your password stays as it is.".into(),
         ],
     };
     let message = message(mail, to, &content)?;
@@ -277,15 +285,18 @@ async fn send_reset(mail: &Mail, user: &UserEntry, email: &str, link: &str) -> R
 pub(crate) struct Content {
     pub subject: String,
     pub preview: String,
+    /// The greeting at the top, e.g. "Hi sam,".
     pub heading: String,
     pub paragraphs: Vec<String>,
-    /// Text and address of the one button.
+    /// Bold, at the end of the last paragraph: what matters most, e.g. how long a link works.
+    pub emphasis: Option<String>,
+    /// Text and address of the one button; the address is also written out below it.
     pub button: Option<(String, String)>,
     /// Paragraphs below the button.
     pub after: Vec<String>,
 }
 
-fn message(mail: &Mail, to: Mailbox, content: &Content) -> Result<Message> {
+pub(crate) fn message(mail: &Mail, to: Mailbox, content: &Content) -> Result<Message> {
     let from = Mailbox::from_str(&mail.from)
         .map_err(|_| CoreError::Invalid("the sender of the mail settings is not an address"))?;
     Message::builder()
@@ -299,11 +310,18 @@ fn message(mail: &Mail, to: Mailbox, content: &Content) -> Result<Message> {
         .map_err(|err| CoreError::Mail(err.to_string()))
 }
 
-/// The plain-text part, for mail programs that do not show HTML.
+/// The plain-text part, for mail programs that do not show HTML. Same order as the HTML.
 pub(crate) fn plain(content: &Content) -> String {
-    let mut text = format!("{}\n\n", content.heading);
-    for paragraph in &content.paragraphs {
+    let mut text = format!("Kura\n\n{}\n\n", content.heading);
+    let last = content.paragraphs.len().saturating_sub(1);
+    for (index, paragraph) in content.paragraphs.iter().enumerate() {
         text.push_str(paragraph);
+        if index == last
+            && let Some(emphasis) = &content.emphasis
+        {
+            text.push(' ');
+            text.push_str(emphasis);
+        }
         text.push_str("\n\n");
     }
     if let Some((label, url)) = &content.button {
@@ -313,49 +331,80 @@ pub(crate) fn plain(content: &Content) -> String {
         text.push_str(paragraph);
         text.push_str("\n\n");
     }
-    text.push_str("-- \nKura, sent automatically. Replies are not read.\n");
+    text.push_str(&format!("-- \n{}\n", footer_lines().join("\n")));
     text
 }
 
 /// The HTML part: Kura's colours on a plain table layout that mail programs show alike.
 pub(crate) fn html(content: &Content) -> String {
-    let paragraph = |text: &String, last: bool| {
-        let margin = if last { 0 } else { 16 };
-        format!(
-            "<p style=\"margin:0 0 {margin}px;font-size:15px;line-height:24px;color:#a1a1a1;\">{}</p>\n",
-            escape(text)
-        )
-    };
-    let block = |list: &[String]| -> String {
-        list.iter()
-            .enumerate()
-            .map(|(index, text)| paragraph(text, index + 1 == list.len()))
-            .collect()
-    };
-    let button = match &content.button {
-        Some((label, url)) => format!(
-            "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"margin:24px 0;\"><tr>\
-             <td bgcolor=\"#8b7cff\" style=\"background-color:#8b7cff;border-radius:8px;\">\
-             <a href=\"{url}\" style=\"display:inline-block;padding:12px 20px;font-size:15px;font-weight:600;color:#0a0a0a;text-decoration:none;\">{label}</a>\
-             </td></tr></table>\n\
-             <p style=\"margin:0 0 16px;font-size:12px;line-height:18px;color:#848484;word-break:break-all;\">\
-             Or open this address: <a href=\"{url}\" style=\"color:#8b7cff;\">{url}</a></p>\n",
-            url = escape(url),
-            label = escape(label),
+    const P: &str = "margin:0 0 16px;font-size:16px;line-height:26px;color:#a1a1a1;";
+    let last = content.paragraphs.len().saturating_sub(1);
+    let body: String = content
+        .paragraphs
+        .iter()
+        .enumerate()
+        .map(|(index, text)| {
+            let strong = match (&content.emphasis, index == last) {
+                (Some(emphasis), true) => format!(
+                    " <strong style=\"color:#f5f5f5;font-weight:600;\">{}</strong>",
+                    escape(emphasis)
+                ),
+                _ => String::new(),
+            };
+            format!("<p style=\"{P}\">{}{strong}</p>\n", escape(text))
+        })
+        .collect();
+    let after: String = content
+        .after
+        .iter()
+        .map(|text| format!("<p style=\"{P}\">{}</p>\n", escape(text)))
+        .collect();
+    let (button, fallback) = match &content.button {
+        Some((label, url)) => (
+            format!(
+                "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"margin:32px 0;\"><tr><td align=\"center\">\
+                 <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>\
+                 <td bgcolor=\"#8b7cff\" style=\"background-color:#8b7cff;border-radius:8px;\">\
+                 <a href=\"{url}\" style=\"display:inline-block;padding:14px 28px;font-size:15px;line-height:20px;font-weight:600;color:#0a0a0a;text-decoration:none;border-radius:8px;\">{label}</a>\
+                 </td></tr></table></td></tr></table>\n",
+                url = escape(url),
+                label = escape(label),
+            ),
+            format!(
+                "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"margin-top:16px;\"><tr><td style=\"border-top:1px solid #262626;padding-top:24px;\">\
+                 <p style=\"margin:0 0 8px;font-size:13px;line-height:20px;color:#848484;\">If the button does not work, copy this address into your browser:</p>\
+                 <p style=\"margin:0;font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:18px;word-break:break-all;\"><a href=\"{url}\" style=\"color:#8b7cff;text-decoration:none;\">{url}</a></p>\
+                 </td></tr></table>\n",
+                url = escape(url),
+            ),
         ),
-        None => String::new(),
+        None => (String::new(), String::new()),
     };
     LAYOUT
         .replace("{{subject}}", &escape(&content.subject))
         .replace("{{preview}}", &escape(&content.preview))
-        .replace("{{heading}}", &escape(&content.heading))
-        .replace("{{body}}", &block(&content.paragraphs))
+        .replace("{{greeting}}", &escape(&content.heading))
+        .replace("{{body}}", &body)
         .replace("{{button}}", &button)
-        .replace("{{after}}", &block(&content.after))
+        .replace("{{after}}", &after)
+        .replace("{{fallback}}", &fallback)
         .replace(
             "{{footer}}",
-            "Sent automatically by Kura. Replies to this address are not read.",
+            &footer_lines()
+                .iter()
+                .map(|line| escape(line))
+                .collect::<Vec<_>>()
+                .join("<br>"),
         )
+}
+
+/// The lines under every mail.
+fn footer_lines() -> [String; 2] {
+    let year = chrono::Utc::now().format("%Y");
+    [
+        format!("© {year} Koxility · Kura"),
+        "Sent automatically. Replies to this address are not read.".to_owned(),
+    ]
 }
 
 fn escape(text: &str) -> String {
@@ -373,7 +422,7 @@ fn escape(text: &str) -> String {
     out
 }
 
-fn transport(mail: &Mail) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
+pub(crate) fn transport(mail: &Mail) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
     type Smtp = AsyncSmtpTransport<Tokio1Executor>;
     let failed = |err: lettre::transport::smtp::Error| CoreError::Mail(describe(&err));
     let builder = match mail.encryption {
@@ -390,7 +439,7 @@ fn transport(mail: &Mail) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
 }
 
 /// The mail server's complaint in words an admin can act on; never the password.
-fn describe(err: &lettre::transport::smtp::Error) -> String {
+pub(crate) fn describe(err: &lettre::transport::smtp::Error) -> String {
     let detail = err.to_string();
     if err.is_permanent() && detail.contains("535") {
         return "the mail server refused the user name or password".into();
@@ -431,6 +480,7 @@ mod tests {
             preview: "p".into(),
             heading: "h".into(),
             paragraphs: vec!["Hello <img src=x onerror=alert(1)> & \"friends\"".into()],
+            emphasis: Some("<b>valid</b>".into()),
             button: Some((
                 "Go".into(),
                 "https://kura.example.org/reset-password#token=ab\"><x".into(),
@@ -442,6 +492,7 @@ mod tests {
         assert!(html.contains("&lt;img src=x onerror=alert(1)&gt; &amp; &quot;friends&quot;"));
         assert!(!html.contains("ab\"><x"));
         assert!(!html.contains("{{"), "every placeholder is filled");
+        assert!(html.contains("&lt;b&gt;valid&lt;/b&gt;</strong>"));
         let plain = plain(&content);
         assert!(plain.contains("Go:\nhttps://kura.example.org/reset-password#token=ab"));
     }
@@ -460,6 +511,7 @@ mod tests {
             preview: String::new(),
             heading: String::new(),
             paragraphs: vec![],
+            emphasis: None,
             button: None,
             after: vec![],
         };

@@ -9,8 +9,8 @@ use std::{
 };
 
 use kura_domain::{
-    Account, ApiKey, EpisodeId, Job, Language, Mail, Picked, Request, RequestState, Role, Settings,
-    Theme, User, UserEntry,
+    Account, ApiKey, EpisodeId, Invite, Job, Language, Mail, Picked, Request, RequestState, Role,
+    Settings, Theme, User, UserEntry,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params, types::Type};
 use rusqlite_migration::{M, Migrations};
@@ -120,6 +120,30 @@ CREATE TABLE password_resets (
 /// Added in 1.4.0: whether an account was already asked for an email address after login.
 const EMAIL_ASKED: &str = "ALTER TABLE users ADD COLUMN email_asked INTEGER NOT NULL DEFAULT 0;";
 
+/// Added in 1.4.1: invitations by email. Only the SHA-256 of an invite link's token is kept; an
+/// invite ends with the admin who sent it.
+const INVITES: &str = "
+CREATE TABLE invites (
+    id         INTEGER PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    email      TEXT NOT NULL,
+    role       TEXT NOT NULL,
+    invited_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+";
+
+/// What became of an invite link that someone used to create an account.
+#[derive(Debug, PartialEq)]
+pub enum Redeemed {
+    Created(User),
+    /// Another account has the name; the invite still works with another one.
+    NameTaken,
+    /// No such invite, used up, or expired.
+    Invalid,
+}
+
 const JOB_COLUMNS: &str = "id, site, slug, season, episode, series_title, state, progress, error, path, \
      language, hoster, dir, hidden, queued_at, imdb_id, started_at";
 
@@ -183,6 +207,7 @@ impl Store {
             M::up(ACCOUNTS),
             M::up(MAIL_AND_RESETS),
             M::up(EMAIL_ASKED),
+            M::up(INVITES),
         ])
         .to_latest(&mut conn)?;
         Ok(Self {
@@ -304,6 +329,120 @@ impl Store {
         )?;
         conn.execute("DELETE FROM password_resets WHERE user_id = ?1", [id])?;
         Ok(())
+    }
+
+    // Invites. Times are Unix seconds; the caller hashes the token.
+
+    /// Stores an invite. An older invite for the same address stops working.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_invite(
+        &self,
+        token_hash: &str,
+        email: &str,
+        role: Role,
+        invited_by: i64,
+        now: i64,
+        ttl: i64,
+    ) -> Result<Invite> {
+        let conn = self.conn();
+        conn.execute(
+            "DELETE FROM invites WHERE lower(email) = lower(?1) OR expires_at <= ?2",
+            params![email, now],
+        )?;
+        Ok(conn.query_row(
+            "INSERT INTO invites (token_hash, email, role, invited_by, created_at, expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             RETURNING id, email, role, created_at, expires_at",
+            params![token_hash, email, role.as_str(), invited_by, now, now + ttl],
+            invite,
+        )?)
+    }
+
+    /// The invites that still work.
+    pub fn invites(&self, now: i64) -> Result<Vec<Invite>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, email, role, created_at, expires_at FROM invites
+             WHERE expires_at > ?1 ORDER BY id",
+        )?;
+        let invites = stmt
+            .query_map([now], invite)?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(invites)
+    }
+
+    /// The invite a link names, if it still works.
+    pub fn invite_by_token(&self, token_hash: &str, now: i64) -> Result<Option<Invite>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT id, email, role, created_at, expires_at FROM invites
+                 WHERE token_hash = ?1 AND expires_at > ?2",
+                params![token_hash, now],
+                invite,
+            )
+            .optional()?)
+    }
+
+    pub fn delete_invite(&self, id: i64) -> Result<bool> {
+        Ok(self
+            .conn()
+            .execute("DELETE FROM invites WHERE id = ?1", [id])?
+            > 0)
+    }
+
+    /// Whether an account already has this email (case-insensitive).
+    pub fn email_in_use(&self, email: &str) -> Result<bool> {
+        Ok(self.conn().query_row(
+            "SELECT EXISTS (SELECT 1 FROM users WHERE email IS NOT NULL AND lower(email) = lower(?1))",
+            [email],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Creates the account an invite link stands for, in one transaction: the invite must still
+    /// work, the name must be free, and the invite is gone afterwards. Email and role come from
+    /// the invite, never from the person using it.
+    pub fn redeem_invite(
+        &self,
+        token_hash: &str,
+        name: &str,
+        password_hash: &str,
+        now: i64,
+    ) -> Result<Redeemed> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let found = tx
+            .query_row(
+                "SELECT id, email, role FROM invites WHERE token_hash = ?1 AND expires_at > ?2",
+                params![token_hash, now],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        text::<Role>(row, 2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((id, email, role)) = found else {
+            return Ok(Redeemed::Invalid);
+        };
+        let created = tx
+            .query_row(
+                "INSERT INTO users (name, password_hash, role, email, email_asked)
+                 VALUES (?1, ?2, ?3, ?4, 1)
+                 ON CONFLICT (name) DO NOTHING RETURNING id, name, role",
+                params![name, password_hash, role.as_str(), email],
+                user,
+            )
+            .optional()?;
+        let Some(created) = created else {
+            return Ok(Redeemed::NameTaken);
+        };
+        tx.execute("DELETE FROM invites WHERE id = ?1", [id])?;
+        tx.commit()?;
+        Ok(Redeemed::Created(created))
     }
 
     /// The account was asked for an email after login and said "not now"; it is not asked again.
@@ -826,6 +965,16 @@ fn user(row: &Row) -> rusqlite::Result<User> {
         id: row.get(0)?,
         name: row.get(1)?,
         role: text(row, 2)?,
+    })
+}
+
+fn invite(row: &Row) -> rusqlite::Result<Invite> {
+    Ok(Invite {
+        id: row.get(0)?,
+        email: row.get(1)?,
+        role: text(row, 2)?,
+        created_at: row.get(3)?,
+        expires_at: row.get(4)?,
     })
 }
 
@@ -1420,5 +1569,62 @@ mod tests {
         assert_eq!(store.mail().unwrap(), mail);
         let settings = serde_json::to_string(&store.settings().unwrap()).unwrap();
         assert!(!settings.contains("secret"));
+    }
+
+    #[test]
+    fn an_invite_works_once_until_it_expires_and_ends_with_its_admin() {
+        let (store, admin) = store_with_admin();
+        store
+            .create_invite("one", "kim@example.org", Role::User, admin.id, 100, 60)
+            .unwrap();
+        // Expired at 160.
+        assert_eq!(
+            store.redeem_invite("one", "kim", "hash", 160).unwrap(),
+            Redeemed::Invalid
+        );
+        assert!(store.invites(160).unwrap().is_empty());
+
+        store
+            .create_invite("two", "kim@example.org", Role::Admin, admin.id, 200, 60)
+            .unwrap();
+        // A newer invite for the same address replaces it.
+        store
+            .create_invite("three", "KIM@example.org", Role::User, admin.id, 201, 60)
+            .unwrap();
+        assert_eq!(
+            store.redeem_invite("two", "kim", "hash", 202).unwrap(),
+            Redeemed::Invalid
+        );
+        assert_eq!(
+            store.redeem_invite("three", "admin", "hash", 202).unwrap(),
+            Redeemed::NameTaken
+        );
+        let Redeemed::Created(kim) = store.redeem_invite("three", "kim", "hash", 202).unwrap()
+        else {
+            panic!("the invite should work");
+        };
+        assert_eq!(kim.role, Role::User);
+        assert_eq!(
+            store.account(kim.id).unwrap().unwrap().email.as_deref(),
+            Some("KIM@example.org")
+        );
+        assert_eq!(
+            store.redeem_invite("three", "kim2", "hash", 203).unwrap(),
+            Redeemed::Invalid
+        );
+
+        // Deleting the admin who sent an invite ends it.
+        let other = store
+            .create_user("other", "hash", Role::Admin)
+            .unwrap()
+            .unwrap();
+        store
+            .create_invite("four", "lee@example.org", Role::User, other.id, 300, 60)
+            .unwrap();
+        assert!(store.delete_user(other.id).unwrap());
+        assert_eq!(
+            store.redeem_invite("four", "lee", "hash", 301).unwrap(),
+            Redeemed::Invalid
+        );
     }
 }
