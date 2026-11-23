@@ -11,7 +11,9 @@ The web app and other programs, such as [Musubi](https://github.com/Koxility/mus
   Authorization: Bearer kura_…
   ```
 
-A key has the rights of the account it belongs to: an admin's key can queue downloads, a user's key can send requests. Deleting the key, or its account, ends its access at once. A request with an unknown key is answered `401`.
+A key has the rights of the account it belongs to: an admin's key can queue downloads, a user's key can send requests. It cannot change the password or create or delete keys; those need a login with the password. Deleting the key, changing the account's password, or deleting the account ends its access at once. A request with an unknown key is answered `401`.
+
+A change (any method but `GET`, `HEAD`, `OPTIONS`) that comes with the session cookie from a page on another website is refused with `403`, also from a neighbouring subdomain. Kura goes by the browser's `Sec-Fetch-Site`, or else compares `Origin` with the address it was asked under (`X-Forwarded-Host`, else `Host`). Programs that send neither header, and every request with an API key, are not affected.
 
 ## Errors
 
@@ -23,7 +25,7 @@ Sites are `aniworld` or `serienstream`; languages are `german_dub`, `german_sub`
 
 | Method and path | Who | What |
 |---|---|---|
-| `GET /status` | anyone | Version, `commit`, the caller (`user`, or `null`), enabled `sites`, `defaults` |
+| `GET /status` | anyone | The caller (`user`, or `null`), enabled `sites`, `defaults`; `version`, `commit` and `latest_version` only for a logged-in caller (`null` otherwise) |
 | `GET /account` | user | Own name, role, email, theme |
 | `GET /search?q=…&site=…` | user | Titles matching the text, on one site or all |
 | `GET /new/{site}` · `GET /popular/{site}` | user | Title lists |

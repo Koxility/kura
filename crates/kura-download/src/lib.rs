@@ -85,6 +85,19 @@ pub async fn download(
     format: OutputFormat,
     on_progress: impl FnMut(Progress),
 ) -> Result<()> {
+    download_through(stream, target, format, None, on_progress).await
+}
+
+/// Like [`download`], with every connection of ffmpeg and ffprobe going through the HTTP
+/// proxy at `proxy` (e.g. `http://127.0.0.1:41234`): the first request, redirects and the
+/// parts of an HLS playlist alike.
+pub async fn download_through(
+    stream: &Stream,
+    target: &Path,
+    format: OutputFormat,
+    proxy: Option<&str>,
+    on_progress: impl FnMut(Progress),
+) -> Result<()> {
     // The URL comes from a hoster page; ffmpeg would also open local files and devices.
     if !stream.url.starts_with("https://") && !stream.url.starts_with("http://") {
         return Err(DownloadError::BadUrl(stream.url.clone()));
@@ -102,6 +115,10 @@ pub async fn download(
             .iter()
             .map(|(name, value)| format!("{name}: {value}\r\n"));
         input.extend(["-headers".to_owned(), headers.collect()]);
+    }
+    if let Some(proxy) = proxy {
+        // The HLS reader passes it on to every part it opens.
+        input.extend(["-http_proxy".to_owned(), proxy.to_owned()]);
     }
     input.extend(["-i".to_owned(), stream.url.clone()]);
     run(&input, target, format, STALL_AFTER, on_progress).await

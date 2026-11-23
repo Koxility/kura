@@ -66,7 +66,9 @@ async fn setup_login_and_logout() {
         (code, &fresh["needs_setup"], &fresh["user"]),
         (200, &json!(true), &Value::Null)
     );
-    assert_eq!(fresh["version"], env!("CARGO_PKG_VERSION"));
+    // Which build runs is for those who are logged in.
+    assert_eq!(fresh["version"], Value::Null);
+    assert_eq!(fresh["commit"], Value::Null);
     // Everyone, logged in or not, learns how the app looks over an ASCII background.
     assert_eq!(fresh["backdrop"], "glass");
     assert_eq!(fresh["latest_version"], Value::Null);
@@ -87,6 +89,7 @@ async fn setup_login_and_logout() {
 
     let admin = server.log_in("/setup", "admin", "correct horse").await;
     let (_, status) = server.get("/status", &admin).await;
+    assert_eq!(status["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(status["needs_setup"], false);
     assert_eq!(status["user"]["role"], "admin");
     assert!(
@@ -681,4 +684,134 @@ async fn admins_manage_the_songs_and_everyone_lists_them() {
     assert_eq!(upload(&admin).await.unwrap().status(), 400);
     let remove = server.call(Method::DELETE, "/admin/theme/songs/abc", &sam, Value::Null);
     assert_eq!(remove.await.0, 403);
+}
+
+#[tokio::test]
+async fn keys_cannot_make_keys_and_end_with_the_password() {
+    let server = Server::start().await;
+    server.log_in("/setup", "admin", "correct horse").await;
+    let admin = server.log_in("/login", "admin", "correct horse").await;
+    let other = server.log_in("/login", "admin", "correct horse").await;
+    let (_, created) = server
+        .call(
+            Method::POST,
+            "/account/keys",
+            &admin,
+            json!({ "name": "Musubi" }),
+        )
+        .await;
+    let secret = created["secret"].as_str().unwrap().to_owned();
+    let with_key = |method: Method, path: &str, body: Value| {
+        let url = format!("{}/api/v1{path}", server.base);
+        let request = server.http.request(method, url).bearer_auth(secret.clone());
+        async move {
+            let request = if body.is_null() {
+                request
+            } else {
+                request.json(&body)
+            };
+            request.send().await.unwrap().status().as_u16()
+        }
+    };
+
+    // A key that got out can neither make itself new keys, nor delete keys, nor change the
+    // password and lock out the owner.
+    let minted = with_key(Method::POST, "/account/keys", json!({ "name": "spare" }));
+    assert_eq!(minted.await, 403);
+    let id = created["key"]["id"].as_i64().unwrap();
+    assert_eq!(
+        with_key(Method::DELETE, &format!("/account/keys/{id}"), Value::Null).await,
+        403
+    );
+    let password = json!({ "current": "correct horse", "new": "battery staple" });
+    assert_eq!(
+        with_key(Method::PUT, "/account/password", password.clone()).await,
+        403
+    );
+    // Everything else the account may do, the key still does.
+    assert_eq!(with_key(Method::GET, "/users", Value::Null).await, 200);
+
+    // A new password ends the other sessions and every key.
+    let changed = server.call(Method::PUT, "/account/password", &admin, password);
+    assert_eq!(changed.await.0, 204);
+    assert_eq!(server.get("/account", &admin).await.0, 200);
+    assert_eq!(server.get("/account", &other).await.0, 401);
+    assert_eq!(with_key(Method::GET, "/account", Value::Null).await, 401);
+    assert_eq!(server.get("/account/keys", &admin).await, (200, json!([])));
+}
+
+#[tokio::test]
+async fn changes_from_other_websites_are_refused() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let host = server.base.trim_start_matches("http://").to_owned();
+    let clear = |headers: &[(&str, &str)]| {
+        let mut request = server.request(Method::POST, "/queue/clear", &admin);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        async move { request.send().await.unwrap().status().as_u16() }
+    };
+
+    // What a page on a neighbouring subdomain could send: `SameSite=Strict` lets the cookie
+    // through, so the browser's own headers decide.
+    assert_eq!(clear(&[("sec-fetch-site", "same-site")]).await, 403);
+    assert_eq!(clear(&[("sec-fetch-site", "cross-site")]).await, 403);
+    assert_eq!(clear(&[("origin", "https://evil.example.org")]).await, 403);
+    assert_eq!(clear(&[("origin", "null")]).await, 403);
+    let song = server.request(Method::POST, "/admin/theme/songs?name=x", &admin);
+    let song = song
+        .header("sec-fetch-site", "same-site")
+        .header("content-type", "text/plain");
+    assert_eq!(song.body("ID3").send().await.unwrap().status(), 403);
+
+    // Kura's own pages, older browsers on the same address, and programs.
+    assert_eq!(clear(&[("sec-fetch-site", "same-origin")]).await, 200);
+    let own = format!("http://{host}");
+    assert_eq!(clear(&[("origin", own.as_str())]).await, 200);
+    let proxied = [
+        ("origin", "https://kura.example.org"),
+        ("x-forwarded-host", "kura.example.org"),
+    ];
+    assert_eq!(clear(&proxied).await, 200);
+    assert_eq!(clear(&[]).await, 200);
+    // Reading stays open: a page elsewhere cannot read the answer anyway.
+    let read = server
+        .request(Method::GET, "/queue", &admin)
+        .header("sec-fetch-site", "cross-site");
+    assert_eq!(read.send().await.unwrap().status(), 200);
+}
+
+#[tokio::test]
+async fn pages_tell_the_browser_what_is_allowed() {
+    let server = Server::start().await;
+    for path in ["/", "/api/v1/status"] {
+        let response = server
+            .http
+            .get(format!("{}{path}", server.base))
+            .send()
+            .await
+            .unwrap();
+        let headers = response.headers();
+        let policy = headers["content-security-policy"].to_str().unwrap();
+        assert!(policy.contains("frame-ancestors 'none'") && policy.contains("script-src 'self'"));
+        assert_eq!(headers["x-frame-options"], "DENY");
+        assert_eq!(headers["x-content-type-options"], "nosniff");
+        assert_eq!(headers["referrer-policy"], "no-referrer");
+        // Plain HTTP, as at home: no HSTS, or the browser would refuse it afterwards.
+        assert!(headers.get("strict-transport-security").is_none());
+    }
+
+    // Behind a trusted proxy that says the person came over HTTPS.
+    let proxied = Server::behind(TrustedProxies::parse("127.0.0.1").unwrap()).await;
+    let response = proxied.http.get(format!("{}/", proxied.base));
+    let response = response
+        .header("x-forwarded-proto", "https")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.headers()["strict-transport-security"],
+        "max-age=31536000"
+    );
 }

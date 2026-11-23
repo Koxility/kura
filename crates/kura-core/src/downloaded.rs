@@ -228,6 +228,15 @@ impl Core {
         Ok((folders, on_disk))
     }
 
+    /// Forgets the last look at the libraries if it is at least `age` old, so the next
+    /// question reads them again; a younger one is kept.
+    pub fn forget_scan_older_than(&self, age: Duration) {
+        let mut scan = self.scan.lock().unwrap_or_else(PoisonError::into_inner);
+        if scan.as_ref().is_some_and(|scan| scan.at.elapsed() >= age) {
+            *scan = None;
+        }
+    }
+
     /// Makes the next lookup read the library folders again, e.g. after a download.
     pub fn forget_scan(&self) {
         *self.scan.lock().unwrap_or_else(PoisonError::into_inner) = None;

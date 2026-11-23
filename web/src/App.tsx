@@ -125,29 +125,37 @@ function Shell({ status }: { status: Status }) {
   );
 }
 
-/** Copyright, version and the commit the build came from. */
+/** Copyright, version and the commit the build came from; the version only once logged in. */
 function Footer({ status }: { status: Status }) {
-  const known = status.commit !== "unknown";
+  const { version, commit } = status;
   return (
     <footer className={styles.footer}>
       <span>© {new Date().getFullYear()} Koxility</span>
-      <span aria-hidden="true">·</span>
-      <a href={`${status.repository}/releases/tag/v${status.version}`} target="_blank" rel="noreferrer">
-        Kura v{status.version}
-      </a>
-      <span aria-hidden="true">·</span>
-      {known ? (
-        <a
-          className={styles.commit}
-          href={`${status.repository}/commit/${status.commit}`}
-          target="_blank"
-          rel="noreferrer"
-          title="The commit this build came from"
-        >
-          {status.commit}
-        </a>
-      ) : (
-        <span className={styles.commit}>{status.commit}</span>
+      {version && (
+        <>
+          <span aria-hidden="true">·</span>
+          <a href={`${status.repository}/releases/tag/v${version}`} target="_blank" rel="noreferrer">
+            Kura v{version}
+          </a>
+        </>
+      )}
+      {commit && (
+        <>
+          <span aria-hidden="true">·</span>
+          {commit !== "unknown" ? (
+            <a
+              className={styles.commit}
+              href={`${status.repository}/commit/${commit}`}
+              target="_blank"
+              rel="noreferrer"
+              title="The commit this build came from"
+            >
+              {commit}
+            </a>
+          ) : (
+            <span className={styles.commit}>{commit}</span>
+          )}
+        </>
       )}
     </footer>
   );

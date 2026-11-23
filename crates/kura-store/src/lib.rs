@@ -371,8 +371,8 @@ impl Store {
             .optional()?)
     }
 
-    /// Replaces a user's password hash and ends their other sessions, so a changed password
-    /// also logs out every other device.
+    /// Replaces a user's password hash, ends their other sessions and deletes their API
+    /// keys, so a changed password also locks out every other device and program.
     pub fn set_password(
         &self,
         user_id: i64,
@@ -388,6 +388,7 @@ impl Store {
             "DELETE FROM sessions WHERE user_id = ?1 AND token_hash != ?2",
             params![user_id, keep_session],
         )?;
+        conn.execute("DELETE FROM api_keys WHERE user_id = ?1", [user_id])?;
         Ok(())
     }
 

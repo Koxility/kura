@@ -799,9 +799,12 @@ function PasswordForm() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [again, setAgain] = useState("");
+  const client = useQueryClient();
   const change = useMutation({
     mutationFn: () => api("/account/password", "PUT", { current, new: next }),
     onSuccess: () => {
+      // The account's API keys are gone with the old password.
+      client.invalidateQueries({ queryKey: ["api-keys"] });
       setCurrent("");
       setNext("");
       setAgain("");
@@ -863,7 +866,7 @@ function PasswordForm() {
         </button>
         <Outcome
           mutation={change}
-          done="Password changed. Other devices with this account are logged out."
+          done="Password changed. Other devices with this account are logged out, and its API keys are deleted."
         />
       </div>
     </form>
@@ -895,7 +898,8 @@ function ApiKeys() {
       <h4 className={styles.subheading}>API keys</h4>
       <p className={styles.hint}>
         Other programs, such as Musubi, use a key instead of your name and password. A key can do
-        what your account can.
+        what your account can, except change the password or the keys. Changing your password
+        deletes every key.
       </p>
       {keys.data && keys.data.length > 0 && (
         <ul className={`${ui.list} ${styles.top}`}>

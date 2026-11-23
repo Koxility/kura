@@ -182,9 +182,10 @@ export interface Settings {
 export interface Status {
   needs_setup: boolean;
   user: User | null;
-  version: string;
-  /** Short commit hash of the build, or `unknown`. */
-  commit: string;
+  /** `null` until someone is logged in: which build runs is not for strangers. */
+  version: string | null;
+  /** Short commit hash of the build, or `unknown`; `null` until someone is logged in. */
+  commit: string | null;
   /** How text stays readable over the ASCII background, the same for every account. */
   backdrop: Backdrop;
   repository: string;

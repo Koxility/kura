@@ -28,7 +28,7 @@ AniWorld and SerienStream host no video. They list series and episodes and link 
 | `kura-domain` | Plain types shared by all crates. No I/O. |
 | `kura-sites` | One module per site. Knows hosters only by name and link. |
 | `kura-hosters` | One module per hoster. Knows nothing about sites. |
-| `kura-download` | Runs ffmpeg on a stream URL. Knows nothing about sites or hosters. |
+| `kura-download` | Runs ffmpeg on a stream URL. Knows nothing about sites or hosters. ffmpeg's connections go through the relay in `kura-sites` (`relay.rs`), which only connects to public addresses, so a redirect or a playlist part cannot reach the local network. |
 | `kura-store` | SQLite: users, sessions, settings, download queue, requests. |
 | `kura-core` | Joins the crates above: search, fallback, queue, workers, events. |
 | `kura` | The binary: HTTP routes, authentication, live events, embedded frontend. |
@@ -41,7 +41,7 @@ For each episode, `kura-core` takes the first language from the settings and wal
 
 ## Other programs
 
-Other programs, such as [Musubi](https://github.com/Koxility/musubi), use the same JSON API as the web app, with a per-user API key instead of the session cookie. [API.md](API.md) lists what a client needs. A key has the rights of its user, no more.
+Other programs, such as [Musubi](https://github.com/Koxility/musubi), use the same JSON API as the web app, with a per-user API key instead of the session cookie. [API.md](API.md) lists what a client needs. A key has the rights of its user, no more, and cannot change the password or the keys.
 
 ## Requests and roles
 

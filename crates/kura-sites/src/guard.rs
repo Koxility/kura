@@ -116,6 +116,38 @@ pub async fn check_stream(url: &str) -> Result<(), Blocked> {
     Ok(())
 }
 
+/// The `host:port` of the HTTP proxy the environment names (`HTTPS_PROXY`, `HTTP_PROXY`,
+/// `ALL_PROXY`, in that order), if any.
+pub fn environment_proxy() -> Option<String> {
+    let names = [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ];
+    let value = names
+        .iter()
+        .find_map(|name| std::env::var(name).ok().filter(|v| !v.is_empty()))?;
+    let value = if value.contains("://") {
+        value
+    } else {
+        format!("http://{value}")
+    };
+    let url = Url::parse(&value).ok()?;
+    if url.scheme() != "http" {
+        return None;
+    }
+    let host = url.host_str()?;
+    let port = url.port_or_known_default()?;
+    Some(if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    })
+}
+
 /// Looks names up and leaves out every address that is not public. The proxies set in the
 /// environment are the exception: they are chosen by whoever runs Kura and often sit in the
 /// local network, e.g. a VPN container.

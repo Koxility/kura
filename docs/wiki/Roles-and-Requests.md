@@ -30,7 +30,7 @@ Admins can tidy the list with **Clear requests**: it removes accepted and reject
 
 ## Changing your password
 
-Every account, admin or user, changes its own name, password and email under Settings → User (admins: Settings → Users). The current password is needed to change it; other devices logged in with the account are logged out.
+Every account, admin or user, changes its own name, password and email under Settings → User (admins: Settings → Users). The current password is needed to change it; other devices logged in with the account are logged out, and the account's API keys are deleted, so programs such as Musubi need a new key.
 
 ## Managing users
 

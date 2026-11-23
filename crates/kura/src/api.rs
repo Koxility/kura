@@ -8,12 +8,15 @@ use axum::{
     body::Bytes,
     extract::{ConnectInfo, DefaultBodyLimit, FromRequestParts, Path, Query, State},
     http::{
-        HeaderMap, HeaderValue, StatusCode, Uri,
+        HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri,
         header::{
-            AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE, COOKIE, ETAG, IF_NONE_MATCH, SET_COOKIE,
+            AUTHORIZATION, CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, COOKIE, ETAG,
+            HOST, IF_NONE_MATCH, ORIGIN, REFERRER_POLICY, SET_COOKIE, STRICT_TRANSPORT_SECURITY,
+            X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
         },
         request::Parts,
     },
+    middleware::{self, Next},
     response::{
         IntoResponse, Response,
         sse::{Event as SseEvent, KeepAlive, Sse},
@@ -115,12 +118,50 @@ fn router(core: Arc<Core>) -> Router {
             CACHE_CONTROL,
             HeaderValue::from_static("no-store"),
         ));
+    let header = |name: HeaderName, value: &'static str| {
+        SetResponseHeaderLayer::if_not_present(name, HeaderValue::from_static(value))
+    };
     Router::new()
         .nest("/api/v1", api)
         .fallback(asset)
         .with_state(core)
         // Leaves the event stream alone: its default predicate skips `text/event-stream`.
         .layer(CompressionLayer::new())
+        // What the browser may do with Kura's pages: run only Kura's own scripts, show covers
+        // from the sites, and never show Kura inside another website's frame.
+        .layer(header(CONTENT_SECURITY_POLICY, CONTENT_SECURITY))
+        .layer(header(X_FRAME_OPTIONS, "DENY"))
+        .layer(header(X_CONTENT_TYPE_OPTIONS, "nosniff"))
+        .layer(header(REFERRER_POLICY, "no-referrer"))
+        .layer(middleware::from_fn(strict_transport))
+}
+
+/// Scripts, styles, fonts and requests stay on Kura's own address; covers come from the sites
+/// over HTTPS; songs play from Kura. `'unsafe-inline'` for styles only, for the `style`
+/// attributes React sets.
+const CONTENT_SECURITY: &str = "default-src 'self'; script-src 'self'; \
+     style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' blob:; \
+     font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; \
+     form-action 'self'; frame-ancestors 'none'";
+
+/// Over HTTPS (as a trusted proxy reports it), browsers are told to keep to HTTPS for this
+/// host. Not over plain HTTP: Kura often runs that way at home, and a browser that once saw
+/// the header would refuse the plain address afterwards.
+async fn strict_transport(
+    Extension(proxies): Proxies,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let https = proxies.client(from.ip(), request.headers()).https;
+    let mut response = next.run(request).await;
+    if https {
+        response.headers_mut().insert(
+            STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000"),
+        );
+    }
+    response
 }
 
 // Errors
@@ -177,15 +218,23 @@ impl FromRequestParts<Arc<Core>> for Session {
 
     async fn from_request_parts(parts: &mut Parts, core: &Arc<Core>) -> ApiResult<Self> {
         let denied = || error(StatusCode::UNAUTHORIZED, "log in first");
-        caller(core, &parts.headers)?.ok_or_else(denied)
+        caller(core, &parts.method, &parts.headers)?.ok_or_else(denied)
     }
 }
 
-/// Who sends a request: the session cookie wins, then an API key.
-fn caller(core: &Core, headers: &HeaderMap) -> ApiResult<Option<Session>> {
+/// Who sends a request: the session cookie wins, then an API key. A cookie that comes with a
+/// change sent from another website is refused: the browser adds it on its own, also when a
+/// page elsewhere (even on a neighbouring subdomain, which `SameSite` lets through) sends it.
+fn caller(core: &Core, method: &Method, headers: &HeaderMap) -> ApiResult<Option<Session>> {
     if let Some(token) = session_token(headers)
         && let Some(user) = core.session(token)?
     {
+        if changes(method) && from_elsewhere(headers) {
+            return Err(error(
+                StatusCode::FORBIDDEN,
+                "this request came from another website",
+            ));
+        }
         return Ok(Some(Session {
             user,
             token: Some(token.to_owned()),
@@ -204,6 +253,49 @@ fn caller(core: &Core, headers: &HeaderMap) -> ApiResult<Option<Session>> {
         }
         None => Ok(None),
     }
+}
+
+fn changes(method: &Method) -> bool {
+    !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
+}
+
+/// Whether the browser says the request was started by a page that is not Kura. Browsers
+/// send `Sec-Fetch-Site`, which no page can set; older ones only `Origin`, which is then
+/// compared with the address Kura was asked under. Programs that send neither are not
+/// browsers and are let through.
+fn from_elsewhere(headers: &HeaderMap) -> bool {
+    let text = |name| {
+        headers
+            .get(name)
+            .and_then(|value: &HeaderValue| value.to_str().ok())
+    };
+    if let Some(site) = text(HeaderName::from_static("sec-fetch-site")) {
+        return !matches!(site, "same-origin" | "none");
+    }
+    let Some(origin) = text(ORIGIN) else {
+        return false;
+    };
+    let host = text(HeaderName::from_static("x-forwarded-host")).or(text(HOST));
+    let origin = origin.split_once("://").map(|(_, rest)| rest);
+    match (origin, host) {
+        (Some(origin), Some(host)) => {
+            let host = host.split(',').next().unwrap_or_default().trim();
+            !origin.eq_ignore_ascii_case(host)
+        }
+        // `Origin: null` (a sandboxed frame, a file) or no address to compare with.
+        _ => true,
+    }
+}
+
+/// A login in the browser, not an API key: for the password and the keys themselves, so a
+/// key that got out cannot make itself new keys or lock out the account's owner.
+fn in_browser(session: &Session) -> ApiResult<&str> {
+    session.token.as_deref().ok_or_else(|| {
+        error(
+            StatusCode::FORBIDDEN,
+            "log in with your password to change the password or API keys",
+        )
+    })
 }
 
 /// A logged-in admin.
@@ -251,15 +343,17 @@ struct Credentials {
 }
 
 async fn status(State(core): App, headers: HeaderMap) -> ApiResult<Json<Value>> {
-    let user = caller(&core, &headers)?.map(|session| session.user);
+    let user = caller(&core, &Method::GET, &headers)?.map(|session| session.user);
+    // Which build runs, and so which known flaws it has, is for those who use it.
+    let known = user.is_some();
     Ok(Json(json!({
         "needs_setup": core.needs_setup()?,
         "user": user,
-        "version": env!("CARGO_PKG_VERSION"),
-        "commit": env!("KURA_COMMIT"),
+        "version": known.then_some(env!("CARGO_PKG_VERSION")),
+        "commit": known.then_some(env!("KURA_COMMIT")),
         "backdrop": core.settings()?.backdrop,
         "repository": format!("https://github.com/{REPOSITORY}"),
-        "latest_version": core.newer_release(),
+        "latest_version": if known { core.newer_release() } else { None },
         "needs_library": core.settings()?.libraries.is_empty(),
         "sites": core.enabled_sites()?,
         // What a title's page shows as chosen before anyone picks; library names stay with
@@ -335,14 +429,14 @@ struct NewPassword {
     new: String,
 }
 
-/// Every account changes its own password; the other sessions of that account end.
+/// Every account changes its own password, logged in with the old one; the other sessions
+/// and every API key of that account end.
 async fn change_password(
     State(core): App,
     session: Session,
     Json(form): Json<NewPassword>,
 ) -> ApiResult<StatusCode> {
-    // Over an API key, every session of the account ends.
-    let keep = session.token.as_deref().unwrap_or_default();
+    let keep = in_browser(&session)?;
     let changed = core.change_password(&session.user, keep, &form.current, &form.new);
     if changed.await? {
         Ok(StatusCode::NO_CONTENT)
@@ -422,6 +516,7 @@ async fn create_api_key(
     session: Session,
     Json(form): Json<NewName>,
 ) -> ApiResult<Json<Value>> {
+    in_browser(&session)?;
     let (key, secret) = core.create_api_key(&session.user, &form.name)?;
     Ok(Json(json!({ "key": key, "secret": secret })))
 }
@@ -431,6 +526,7 @@ async fn delete_api_key(
     session: Session,
     Path(id): Path<i64>,
 ) -> ApiResult<StatusCode> {
+    in_browser(&session)?;
     if core.delete_api_key(&session.user, id)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -639,8 +735,10 @@ async fn downloaded(
     Path((site, slug)): Path<(SiteId, String)>,
     Query(names): Query<SeriesNames>,
 ) -> ApiResult<Json<Vec<(u32, u32)>>> {
-    // Read the library again: files may have been deleted or added since the last look.
-    core.forget_scan();
+    // Read the library again: files may have been deleted or added since the last look. Not
+    // more often than every half minute, however often it is asked: a scan reads every
+    // folder of every library.
+    core.forget_scan_older_than(std::time::Duration::from_secs(30));
     let found = core.downloaded_episodes(site, &slug, &names.title, names.imdb.as_deref());
     Ok(Json(found?))
 }

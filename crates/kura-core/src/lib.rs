@@ -159,7 +159,13 @@ impl Download for Ffmpeg {
         if let Err(blocked) = kura_sites::guard::check_stream(&stream.url).await {
             return Err(DownloadError::BadUrl(blocked.to_string()));
         }
-        kura_download::download(stream, target, format, on_progress).await
+        // ffmpeg also follows redirects and the parts a playlist names, and asks DNS again;
+        // the relay checks each of those connections too.
+        let relay = kura_sites::relay::address().await.map_err(|err| {
+            DownloadError::BadUrl(format!("the download relay did not start: {err}"))
+        })?;
+        let relay = format!("http://{relay}");
+        kura_download::download_through(stream, target, format, Some(&relay), on_progress).await
     }
 }
 

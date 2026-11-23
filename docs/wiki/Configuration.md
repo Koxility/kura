@@ -85,7 +85,7 @@ When the queue is empty (nothing queued, nothing downloading), Kura asks Jellyfi
 
 ## Settings → Users / User
 
-Every account has **Your account**: change the name, the password (the current one is needed; other devices are logged out) and an optional email address, which is stored but not used yet. **API keys** let other programs, such as Musubi, use Kura instead of logging in; a key is shown once when it is created and can do what the account can. Admins see the list of all users below that; normal users only see their own account.
+Every account has **Your account**: change the name, the password (the current one is needed; other devices are logged out and the account's API keys are deleted) and an optional email address, which is stored but not used yet. **API keys** let other programs, such as Musubi, use Kura instead of logging in; a key is shown once when it is created and can do what the account can, except change the password or the keys. Admins see the list of all users below that; normal users only see their own account.
 
 ## Settings → Theme
 

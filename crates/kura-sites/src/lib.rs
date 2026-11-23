@@ -5,6 +5,7 @@
 
 mod aniworld;
 pub mod guard;
+pub mod relay;
 mod serienstream;
 
 use std::time::Duration;

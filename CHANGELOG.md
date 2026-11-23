@@ -10,6 +10,18 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 - **Calendar:** the weekday buttons are solid again when no background theme runs (and under the frosted glass). Since 1.3.4 they had no fill, so the days scrolled visibly through them. Weekdays without episodes are shown in a fainter text colour instead of being see-through.
 
+### Security
+
+Findings of a security review, fixed. Nothing here needs an admin to act, but two changes are visible: **changing your password now deletes your API keys** (Musubi needs a new one), and the version shows in the footer only once logged in.
+
+- **No more changes from other websites (CSRF).** The session cookie is `SameSite=Strict`, which stops other sites but not a neighbouring subdomain (e.g. another app under the same domain). A page there could make a logged-in admin's browser accept or reject requests, cancel or clear downloads, start Auto-Sync or upload a song. Kura now refuses any change that the browser marks as coming from another page (`Sec-Fetch-Site`, or `Origin` on older browsers). API keys and programs are not affected.
+- **API keys end with the password.** A new password logs out other devices, as before, and now also deletes the account's API keys, so someone who got hold of the account cannot stay in through a key.
+- **A key cannot make keys.** Creating or deleting API keys and changing the password need a login with the password; an API key gets `403`. Before, a leaked key could make itself a spare that survived deleting it.
+- **Security headers.** Every answer now carries a Content Security Policy (only Kura's own scripts, no framing), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`; over HTTPS (as a trusted proxy reports it) also `Strict-Transport-Security`.
+- **Downloads cannot reach the local network.** Kura checked the stream address before handing it to ffmpeg, but ffmpeg then followed redirects and the parts of an HLS playlist on its own, so a hoster could point it at a machine in your network. ffmpeg and ffprobe now go through a small relay inside Kura that resolves every address itself and only connects to the internet; a proxy set in the environment (`HTTPS_PROXY` …) is still used behind it.
+- **No rescan flood.** Checking which episodes of a title are downloaded read every library folder again on every call, so any user could slow Kura down by asking in a loop. The libraries are now read again at most every 30 seconds for this.
+- **Version only for logged-in users.** `/status` no longer tells visitors who are not logged in which version and commit runs (`version`, `commit` and `latest_version` are `null` for them).
+
 ## [1.3.4] - 2026-11-21
 
 ### Changed
