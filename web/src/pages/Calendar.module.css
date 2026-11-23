@@ -1,5 +1,6 @@
 /* Monday to Sunday, like AniWorld; stays in reach while the days scroll by. No strip behind
-   it, only the buttons. */
+   it, only the buttons, and those are solid, with or without a background theme, so the days
+   never show through them. */
 .week {
   position: sticky;
   top: 56px;
@@ -15,7 +16,7 @@
   padding: 8px 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--control-fill);
+  background: var(--surface);
   color: var(--text-2);
   font: inherit;
   font-size: var(--size-s);
@@ -38,7 +39,7 @@
 }
 
 .weekday:disabled {
-  opacity: 0.4;
+  color: var(--text-3);
   cursor: default;
 }
 

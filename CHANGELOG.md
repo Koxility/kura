@@ -4,6 +4,12 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-11-23
+
+### Fixed
+
+- **Calendar:** the weekday buttons are solid again when no background theme runs (and under the frosted glass). Since 1.3.4 they had no fill, so the days scrolled visibly through them. Weekdays without episodes are shown in a fainter text colour instead of being see-through.
+
 ## [1.3.4] - 2026-11-21
 
 ### Changed
@@ -270,7 +276,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.3.4...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.3.5...HEAD
+[1.3.5]: https://github.com/Koxility/kura/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/Koxility/kura/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/Koxility/kura/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/Koxility/kura/compare/v1.3.1...v1.3.2
