@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ChangeEvent, type FormEvent, useRef, useState } from "react";
-import { NavLink, useParams } from "react-router";
+import { Navigate, NavLink, useParams } from "react-router";
 import {
   type Account,
   accountQuery,
@@ -13,6 +13,8 @@ import {
   type Library,
   languageNames,
   languages,
+  type MailEncryption,
+  type MailSettings,
   type Settings,
   type Site,
   settingsQuery,
@@ -22,66 +24,114 @@ import {
   songsQuery,
   type Theme,
   type User,
+  type UserEntry,
 } from "../api";
 import { pieceFromLink, pieceTitle } from "../ThemeEffects";
 import ui from "../ui.module.css";
 import styles from "./Settings.module.css";
 
-/** Server settings are for admins; everyone has their own account and theme. */
-const sections = [
+type Part = { id: string; title: string };
+type Section = Part & { admin?: boolean; parts?: Part[] };
+
+/** Server settings are for admins; everyone has their own account and theme. Administration
+ *  has parts of its own, listed under it in the menu while it is open. */
+const sections: Section[] = [
   { id: "downloads", title: "Downloads", admin: true },
   { id: "library", title: "Library", admin: true },
   { id: "sites", title: "Sites", admin: true },
   { id: "auto-sync", title: "Auto-Sync", admin: true },
   { id: "jellyfin", title: "Jellyfin", admin: true },
-  { id: "users", title: "Users", userTitle: "User" },
+  { id: "account", title: "Account" },
   { id: "theme", title: "Theme" },
-  { id: "administration", title: "Administration", admin: true },
+  {
+    id: "administration",
+    title: "Administration",
+    admin: true,
+    parts: [
+      { id: "users", title: "Users" },
+      { id: "mail", title: "Mail" },
+      { id: "configuration", title: "Configuration" },
+      { id: "network", title: "Network" },
+    ],
+  },
 ];
 
 export function SettingsPage({ user }: { user: User }) {
   const admin = user.role === "admin";
   const settings = useQuery({ ...settingsQuery, enabled: admin });
-  const shown = sections
-    .filter((section) => admin || !section.admin)
-    .map((section) => ({
-      ...section,
-      title: !admin && section.userTitle ? section.userTitle : section.title,
-    }));
-  const section = shown.find((section) => section.id === useParams().section) ?? shown[0];
+  const params = useParams();
+  const shown = sections.filter((section) => admin || !section.admin);
+  // "Users" was the account's own section before 1.4.
+  if (params.section === "users") return <Navigate to="/settings/account" replace />;
+  const section = shown.find((section) => section.id === params.section) ?? shown[0];
+  const part = section.parts?.find((part) => part.id === params.part) ?? section.parts?.[0];
 
   return (
     <>
       <h1>Settings</h1>
       <div className={styles.layout}>
         <nav className={styles.sections} aria-label="Settings sections">
-          {shown.map((section) => (
-            <NavLink key={section.id} to={`/settings/${section.id}`} className={styles.section}>
-              {section.title}
-            </NavLink>
-          ))}
+          {shown.map((entry) => {
+            const open = entry.id === section.id;
+            return entry.parts ? (
+              <div key={entry.id} className={styles.group}>
+                <NavLink
+                  to={`/settings/${entry.id}`}
+                  className={styles.section}
+                  aria-expanded={open}
+                >
+                  {entry.title}
+                  <span className={styles.chevron} aria-hidden="true">
+                    {open ? "▾" : "▸"}
+                  </span>
+                </NavLink>
+                {open && (
+                  <div className={styles.parts}>
+                    {entry.parts.map((item) => (
+                      <NavLink
+                        key={item.id}
+                        to={`/settings/${entry.id}/${item.id}`}
+                        className={styles.part}
+                        aria-current={item.id === part?.id ? "page" : undefined}
+                      >
+                        {item.title}
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <NavLink key={entry.id} to={`/settings/${entry.id}`} className={styles.section}>
+                {entry.title}
+              </NavLink>
+            );
+          })}
         </nav>
         <div className={styles.content}>
-          <h2 className={styles.heading}>{section.title}</h2>
+          {part && <p className={styles.crumb}>{section.title}</p>}
+          <h2 className={styles.heading}>{part?.title ?? section.title}</h2>
           {settings.isError && (
             <p className={ui.error} role="alert">
               {settings.error.message}
             </p>
           )}
-          {section.id === "users" ? (
-            <>
-              <AccountSection />
-              {admin && <Users me={user} />}
-            </>
+          {section.id === "account" ? (
+            <AccountSection />
           ) : section.id === "theme" ? (
             <ThemeSection admin={admin} />
+          ) : part?.id === "users" ? (
+            <AdminUsers me={user} />
+          ) : part?.id === "mail" ? (
+            <MailSection />
+          ) : part?.id === "network" ? (
+            <IpCheck />
           ) : (
             settings.data && (
               // Remounted per section, so leaving one drops its unsaved changes.
               <SettingsForm
-                key={section.id}
+                key={part?.id ?? section.id}
                 initial={settings.data}
-                section={section.id}
+                section={part?.id ?? section.id}
                 readOnly={!admin}
               />
             )
@@ -135,10 +185,10 @@ function SettingsForm({
         {section === "sites" && <Sites draft={draft} change={change} />}
         {section === "auto-sync" && <AutoSync draft={draft} change={change} />}
         {section === "jellyfin" && <Jellyfin draft={draft} change={change} />}
-        {section === "administration" && (
-          <Administration settings={initial} onImport={(imported) => save.mutate(imported)} />
+        {section === "configuration" && (
+          <Configuration settings={initial} onImport={(imported) => save.mutate(imported)} />
         )}
-        {!readOnly && section !== "administration" && (
+        {!readOnly && section !== "configuration" && (
           <div className={`${ui.actions} ${styles.left}`}>
             <button className={ui.primary} disabled={save.isPending}>
               Save
@@ -153,7 +203,7 @@ function SettingsForm({
             {save.error.message}
           </p>
         )}
-        {section === "administration" && save.isSuccess && (
+        {section === "configuration" && save.isSuccess && (
           <p className={ui.muted} role="status">
             Configuration imported.
           </p>
@@ -534,7 +584,8 @@ function Jellyfin({ draft, change }: SectionProps) {
   );
 }
 
-function Administration({
+/** Export and import of all settings. */
+function Configuration({
   settings,
   onImport,
 }: {
@@ -542,8 +593,6 @@ function Administration({
   onImport: (settings: Settings) => void;
 }) {
   const [problem, setProblem] = useState("");
-  const [ipShown, setIpShown] = useState(false);
-  const ip = useMutation({ mutationFn: () => api<{ ip: string }>("/admin/ip") });
 
   function exportFile() {
     const file = new Blob([JSON.stringify(settings, null, 2)], { type: "application/json" });
@@ -571,10 +620,9 @@ function Administration({
 
   return (
     <>
-      <h2 className={`${ui.section} ${styles.left}`}>Configuration</h2>
       <p className={styles.hint}>
-        The file holds all settings, libraries and Auto-Sync exclusions. Accounts and passwords are
-        not part of it.
+        The file holds all settings, libraries and Auto-Sync exclusions. Accounts, passwords and
+        the mail server are not part of it.
       </p>
       <div className={`${ui.actions} ${styles.left}`}>
         <button type="button" className={ui.button} onClick={exportFile}>
@@ -590,39 +638,38 @@ function Administration({
           {problem}
         </p>
       )}
-
-      <h2 className={`${ui.section} ${styles.left}`}>IP check</h2>
-      {!ipShown ? (
-        <button type="button" className={ui.button} onClick={() => setIpShown(true)}>
-          Show IP check
-        </button>
-      ) : (
-        <>
-          <p className={styles.hint}>
-            Shows the address the server reaches the internet from, e.g. to see whether a VPN is in
-            use. This asks an outside service (api.ipify.org).
-          </p>
-          <div className={`${ui.actions} ${styles.left}`}>
-            <button
-              type="button"
-              className={ui.button}
-              disabled={ip.isPending}
-              onClick={() => ip.mutate()}
-            >
-              Check now
-            </button>
-            <span className={ui.mono} role="status">
-              {ip.isPending ? "Asking…" : ip.data?.ip}
-            </span>
-          </div>
-          {ip.isError && (
-            <p className={ui.error} role="alert">
-              {ip.error.message}
-            </p>
-          )}
-        </>
-      )}
     </>
+  );
+}
+
+/** The address the server reaches the internet from, on request. */
+function IpCheck() {
+  const ip = useMutation({ mutationFn: () => api<{ ip: string }>("/admin/ip") });
+  return (
+    <section className={styles.form}>
+      <p className={styles.hint}>
+        Shows the address the server reaches the internet from, e.g. to see whether a VPN is in
+        use. This asks an outside service (api.ipify.org).
+      </p>
+      <div className={`${ui.actions} ${styles.left}`}>
+        <button
+          type="button"
+          className={ui.button}
+          disabled={ip.isPending}
+          onClick={() => ip.mutate()}
+        >
+          Check now
+        </button>
+        <span className={ui.mono} role="status">
+          {ip.isPending ? "Asking…" : ip.data?.ip}
+        </span>
+      </div>
+      {ip.isError && (
+        <p className={ui.error} role="alert">
+          {ip.error.message}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -718,7 +765,6 @@ function AccountSection() {
   if (!account.data) return null;
   return (
     <section className={styles.form}>
-      <h3 className={`${ui.section} ${styles.left}`}>Your account</h3>
       <NameForm account={account.data} onSaved={saved} />
       <EmailForm account={account.data} onSaved={saved} />
       <PasswordForm />
@@ -762,13 +808,18 @@ function NameForm({ account, onSaved }: { account: Account; onSaved: (next: Acco
 
 function EmailForm({ account, onSaved }: { account: Account; onSaved: (next: Account) => void }) {
   const [email, setEmail] = useState(account.email ?? "");
+  const [password, setPassword] = useState("");
+  const changed = email.trim() !== (account.email ?? "");
   const save = useMutation({
-    mutationFn: () => api<Account>("/account/email", "PUT", { email }),
-    onSuccess: onSaved,
+    mutationFn: () => api<Account>("/account/email", "PUT", { email, password }),
+    onSuccess: (next) => {
+      setPassword("");
+      onSaved(next);
+    },
   });
   return (
     <form
-      className={styles.oneLine}
+      className={styles.password}
       onSubmit={(event) => {
         event.preventDefault();
         save.mutate();
@@ -776,7 +827,7 @@ function EmailForm({ account, onSaved }: { account: Account; onSaved: (next: Acc
     >
       <label className={ui.field}>
         <span>
-          Email <span className={styles.faint}>(optional)</span>
+          Email <span className={styles.faint}>(optional, for password reset)</span>
         </span>
         <input
           className={ui.input}
@@ -787,10 +838,25 @@ function EmailForm({ account, onSaved }: { account: Account; onSaved: (next: Acc
           placeholder="you@example.org"
         />
       </label>
-      <button className={ui.button} disabled={save.isPending || email.trim() === (account.email ?? "")}>
-        Save email
-      </button>
-      <Outcome mutation={save} done="Saved. Kura does not send anything to it yet." />
+      {changed && (
+        <label className={ui.field}>
+          Current password
+          <input
+            className={ui.input}
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="current-password"
+            required
+          />
+        </label>
+      )}
+      <div className={`${ui.actions} ${styles.left}`}>
+        <button className={ui.button} disabled={save.isPending || !changed}>
+          Save email
+        </button>
+        <Outcome mutation={save} done="Saved. A password reset link goes here." />
+      </div>
     </form>
   );
 }
@@ -1335,16 +1401,15 @@ function Songs() {
   );
 }
 
-function Users({ me }: { me: User }) {
+/** Every account: add one, set its email for password resets, delete it. Each row opens to
+ *  its actions, so the list stays short to read. */
+function AdminUsers({ me }: { me: User }) {
   const client = useQueryClient();
-  const users = useQuery({ queryKey: ["users"], queryFn: () => api<User[]>("/users") });
+  const users = useQuery({ queryKey: ["users"], queryFn: () => api<UserEntry[]>("/users") });
+  const mail = useQuery({ queryKey: ["mail"], queryFn: () => api<MailSettings>("/admin/mail") });
   const refresh = () => client.invalidateQueries({ queryKey: ["users"] });
   const add = useMutation({
     mutationFn: (form: Record<string, FormDataEntryValue>) => api("/users", "POST", form),
-    onSuccess: refresh,
-  });
-  const remove = useMutation({
-    mutationFn: (id: number) => api(`/users/${id}`, "DELETE"),
     onSuccess: refresh,
   });
 
@@ -1353,62 +1418,390 @@ function Users({ me }: { me: User }) {
     const form = event.currentTarget;
     add.mutate(Object.fromEntries(new FormData(form)), { onSuccess: () => form.reset() });
   }
-  const failure = add.error ?? remove.error ?? users.error;
 
   return (
-    <section className={`${styles.form} ${styles.top}`}>
-      <h3 className={`${ui.section} ${styles.left}`}>All users</h3>
+    <section className={styles.form}>
+      <p className={styles.hint}>
+        Admins manage settings, users and requests; users browse and ask for titles. A user with
+        an email address can reset a forgotten password
+        {mail.data?.enabled ? "." : " once a mail server is set up under Mail."}
+      </p>
+      {users.error && (
+        <p className={ui.error} role="alert">
+          {users.error.message}
+        </p>
+      )}
       <ul className={`${ui.list} ${styles.top}`}>
         {users.data?.map((user) => (
-          <li key={user.id} className={`${ui.row} ${styles.entry}`}>
-            <span className={ui.grow}>{user.name}</span>
-            <span className={ui.muted}>{user.role === "admin" ? "Admin" : "User"}</span>
-            <button
-              type="button"
-              className={ui.ghost}
-              disabled={user.id === me.id}
-              aria-label={`Delete ${user.name}`}
-              onClick={() => {
-                if (confirm(`Delete ${user.name}? This cannot be undone.`)) remove.mutate(user.id);
-              }}
-            >
-              Delete
-            </button>
+          <li key={user.id}>
+            <UserRow user={user} me={me} onChanged={refresh} />
           </li>
         ))}
       </ul>
-      <form className={styles.newUser} onSubmit={onSubmit}>
+
+      <details className={styles.expander}>
+        <summary className={styles.summary}>Add a user</summary>
+        <form className={styles.expanded} onSubmit={onSubmit}>
+          <label className={ui.field}>
+            Name
+            <input className={ui.input} name="name" autoComplete="off" required />
+          </label>
+          <label className={ui.field}>
+            <span>
+              Email <span className={styles.faint}>(optional, for password reset)</span>
+            </span>
+            <input className={ui.input} name="email" type="email" autoComplete="off" />
+          </label>
+          <label className={ui.field}>
+            Password
+            <input
+              className={ui.input}
+              name="password"
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
+              required
+            />
+          </label>
+          <label className={ui.field}>
+            Role
+            <select className={ui.input} name="role" defaultValue="user">
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <div className={`${ui.actions} ${styles.left}`}>
+            <button className={ui.primary} disabled={add.isPending}>
+              Add user
+            </button>
+            <Outcome mutation={add} done="Added." />
+          </div>
+        </form>
+      </details>
+    </section>
+  );
+}
+
+function UserRow({ user, me, onChanged }: { user: UserEntry; me: User; onChanged: () => void }) {
+  const [email, setEmail] = useState(user.email ?? "");
+  const save = useMutation({
+    mutationFn: () => api(`/users/${user.id}/email`, "PUT", { email }),
+    onSuccess: onChanged,
+  });
+  const remove = useMutation({
+    mutationFn: () => api(`/users/${user.id}`, "DELETE"),
+    onSuccess: onChanged,
+  });
+  const failure = remove.error;
+
+  return (
+    <details className={styles.userRow}>
+      <summary className={styles.userSummary}>
+        <span className={ui.grow}>
+          {user.name}
+          {user.id === me.id && <span className={styles.faint}> (you)</span>}
+        </span>
+        <span className={styles.userEmail}>{user.email ?? "no email"}</span>
+        <span className={ui.muted}>{user.role === "admin" ? "Admin" : "User"}</span>
+      </summary>
+      <div className={styles.expanded}>
+        <form
+          className={styles.oneLine}
+          onSubmit={(event) => {
+            event.preventDefault();
+            save.mutate();
+          }}
+        >
+          <label className={ui.field}>
+            Email for password reset
+            <input
+              className={ui.input}
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              autoComplete="off"
+              placeholder="name@example.org"
+            />
+          </label>
+          <button
+            className={ui.button}
+            disabled={save.isPending || email.trim() === (user.email ?? "")}
+          >
+            Save email
+          </button>
+          <Outcome mutation={save} done="Saved." />
+        </form>
+        <div className={`${ui.actions} ${styles.left}`}>
+          <button
+            type="button"
+            className={ui.ghost}
+            disabled={user.id === me.id || remove.isPending}
+            title={user.id === me.id ? "You cannot delete your own account" : undefined}
+            onClick={() => {
+              if (confirm(`Delete ${user.name}? This cannot be undone.`)) remove.mutate();
+            }}
+          >
+            Delete {user.name}
+          </button>
+        </div>
+        {failure && (
+          <p className={ui.error} role="alert">
+            {failure.message}
+          </p>
+        )}
+      </div>
+    </details>
+  );
+}
+
+const ports: Record<MailEncryption, number> = { starttls: 587, tls: 465, none: 25 };
+
+/** The mail server Kura sends password reset mails through. */
+function MailSection() {
+  const client = useQueryClient();
+  const stored = useQuery({ queryKey: ["mail"], queryFn: () => api<MailSettings>("/admin/mail") });
+  if (stored.isError) {
+    return (
+      <p className={ui.error} role="alert">
+        {stored.error.message}
+      </p>
+    );
+  }
+  if (!stored.data) return null;
+  return (
+    <MailForm
+      key={JSON.stringify(stored.data)}
+      stored={stored.data}
+      onSaved={(next) => {
+        client.setQueryData(["mail"], next);
+        client.invalidateQueries({ queryKey: ["status"] });
+      }}
+    />
+  );
+}
+
+function MailForm({
+  stored,
+  onSaved,
+}: {
+  stored: MailSettings;
+  onSaved: (next: MailSettings) => void;
+}) {
+  const [draft, setDraft] = useState({ ...stored, password: "" });
+  const change = (part: Partial<typeof draft>) => setDraft({ ...draft, ...part });
+  const save = useMutation({
+    mutationFn: (mail: typeof draft) => api<MailSettings>("/admin/mail", "PUT", mail),
+    onSuccess: onSaved,
+  });
+  const off = useMutation({
+    mutationFn: () => api<MailSettings>("/admin/mail", "PUT", { host: "" }),
+    onSuccess: onSaved,
+  });
+  const usernameKept = draft.username === stored.username;
+
+  function encryption(next: MailEncryption) {
+    // The usual port follows, unless someone chose another one.
+    const usual = Object.values(ports).includes(draft.port) || draft.port === 0;
+    change({ encryption: next, port: usual ? ports[next] : draft.port });
+  }
+
+  return (
+    <section className={styles.form}>
+      {stored.enabled ? (
+        <p className={`${ui.notice} ${styles.left}`} role="status">
+          Mail is on: the login page offers <em>Forgot password?</em>
+        </p>
+      ) : (
+        <p className={`${ui.notice} ${styles.left}`} role="status">
+          Mail is off. Until a mail server is set up here, forgotten passwords are reset by an
+          admin under Users.
+        </p>
+      )}
+      <form
+        className={styles.mail}
+        onSubmit={(event) => {
+          event.preventDefault();
+          save.mutate(draft);
+        }}
+      >
+        <div className={`${ui.actions} ${styles.left}`}>
+          <span className={ui.muted}>Fill in for</span>
+          <button
+            type="button"
+            className={ui.ghost}
+            onClick={() => change({ host: "smtp.protonmail.ch", port: 587, encryption: "starttls" })}
+          >
+            Proton Mail
+          </button>
+        </div>
+        <div className={styles.pair}>
+          <label className={ui.field}>
+            Mail server
+            <input
+              className={ui.input}
+              value={draft.host}
+              onChange={(event) => change({ host: event.target.value })}
+              placeholder="smtp.example.org"
+              autoComplete="off"
+              spellCheck={false}
+              required
+            />
+          </label>
+          <label className={ui.field}>
+            Port
+            <input
+              className={`${ui.input} ${styles.short}`}
+              type="number"
+              min={1}
+              max={65535}
+              value={draft.port || ""}
+              onChange={(event) => change({ port: Number(event.target.value) })}
+              required
+            />
+          </label>
+        </div>
         <label className={ui.field}>
-          Name
-          <input className={ui.input} name="name" autoComplete="off" required />
+          Encryption
+          <select
+            className={ui.input}
+            value={draft.encryption}
+            onChange={(event) => encryption(event.target.value as MailEncryption)}
+          >
+            <option value="starttls">STARTTLS (port 587, usual)</option>
+            <option value="tls">TLS (port 465)</option>
+            <option value="none">None (only a relay in your own network)</option>
+          </select>
         </label>
+        {draft.encryption === "none" && (
+          <p className={styles.hint}>
+            Without encryption Kura sends no password, so this only works with a relay that does
+            not ask for one.
+          </p>
+        )}
         <label className={ui.field}>
-          Password
+          User name
           <input
             className={ui.input}
-            name="password"
+            value={draft.username}
+            onChange={(event) => change({ username: event.target.value })}
+            placeholder="noreply@example.org"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <label className={ui.field}>
+          Password or app token
+          <input
+            className={ui.input}
             type="password"
+            value={draft.password}
+            onChange={(event) => change({ password: event.target.value })}
+            placeholder={
+              stored.password_set && usernameKept ? "Stored; leave empty to keep it" : ""
+            }
             autoComplete="new-password"
-            minLength={8}
+          />
+        </label>
+        <p className={styles.hint}>
+          Proton Mail: create an SMTP token under Settings → IMAP/SMTP (paid plans); the address
+          it belongs to is the user name, the token the password.
+        </p>
+        <label className={ui.field}>
+          Sender
+          <input
+            className={ui.input}
+            value={draft.from}
+            onChange={(event) => change({ from: event.target.value })}
+            placeholder="Kura <noreply@example.org>"
+            autoComplete="off"
+            spellCheck={false}
             required
           />
         </label>
         <label className={ui.field}>
-          Role
-          <select className={ui.input} name="role" defaultValue="user">
-            <option value="user">User</option>
-            <option value="admin">Admin</option>
-          </select>
+          Kura's address
+          <span className={styles.oneLine}>
+            <input
+              className={ui.input}
+              type="url"
+              value={draft.public_url}
+              onChange={(event) => change({ public_url: event.target.value })}
+              placeholder="https://kura.example.org"
+              spellCheck={false}
+              required
+            />
+            <button
+              type="button"
+              className={ui.ghost}
+              onClick={() => change({ public_url: window.location.origin })}
+            >
+              Use this one
+            </button>
+          </span>
         </label>
-        <button className={ui.button} disabled={add.isPending}>
-          Add user
-        </button>
-      </form>
-      {failure && (
-        <p className={ui.error} role="alert">
-          {failure.message}
+        <p className={styles.hint}>
+          Links in mails start with this address, so it must be the one people open Kura under.
         </p>
-      )}
+        <div className={`${ui.actions} ${styles.left}`}>
+          <button className={ui.primary} disabled={save.isPending}>
+            Save
+          </button>
+          {stored.host && (
+            <button
+              type="button"
+              className={ui.ghost}
+              disabled={off.isPending}
+              onClick={() => {
+                if (confirm("Switch mail off and forget the mail server?")) off.mutate();
+              }}
+            >
+              Switch mail off
+            </button>
+          )}
+          <Outcome mutation={save} done="Saved." />
+        </div>
+        {off.isError && (
+          <p className={ui.error} role="alert">
+            {off.error.message}
+          </p>
+        )}
+      </form>
+      {stored.enabled && <TestMail />}
     </section>
+  );
+}
+
+function TestMail() {
+  const account = useQuery(accountQuery);
+  const [to, setTo] = useState<string | null>(null);
+  const address = to ?? account.data?.email ?? "";
+  const send = useMutation({ mutationFn: () => api("/admin/mail/test", "POST", { to: address }) });
+  return (
+    <details className={styles.expander} open>
+      <summary className={styles.summary}>Send a test mail</summary>
+      <form
+        className={`${styles.oneLine} ${styles.expanded}`}
+        onSubmit={(event) => {
+          event.preventDefault();
+          send.mutate();
+        }}
+      >
+        <label className={ui.field}>
+          To
+          <input
+            className={ui.input}
+            type="email"
+            value={address}
+            onChange={(event) => setTo(event.target.value)}
+            placeholder="you@example.org"
+            required
+          />
+        </label>
+        <button className={ui.button} disabled={send.isPending}>
+          {send.isPending ? "Sending…" : "Send"}
+        </button>
+        <Outcome mutation={send} done={`Sent. Look in the inbox of ${address}.`} />
+      </form>
+    </details>
   );
 }

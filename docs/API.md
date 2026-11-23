@@ -11,7 +11,7 @@ The web app and other programs, such as [Musubi](https://github.com/Koxility/mus
   Authorization: Bearer kura_…
   ```
 
-A key has the rights of the account it belongs to: an admin's key can queue downloads, a user's key can send requests. It cannot change the password or create or delete keys; those need a login with the password. Deleting the key, changing the account's password, or deleting the account ends its access at once. A request with an unknown key is answered `401`.
+A key has the rights of the account it belongs to: an admin's key can queue downloads, a user's key can send requests. It cannot change the password, the email or create or delete keys; those need a login with the password. Deleting the key, changing the account's password, or deleting the account ends its access at once. A request with an unknown key is answered `401`.
 
 A change (any method but `GET`, `HEAD`, `OPTIONS`) that comes with the session cookie from a page on another website is refused with `403`, also from a neighbouring subdomain. Kura goes by the browser's `Sec-Fetch-Site`, or else compares `Origin` with the address it was asked under (`X-Forwarded-Host`, else `Host`). Programs that send neither header, and every request with an API key, are not affected.
 
@@ -27,6 +27,8 @@ Sites are `aniworld` or `serienstream`; languages are `german_dub`, `german_sub`
 |---|---|---|
 | `GET /status` | anyone | The caller (`user`, or `null`), enabled `sites`, `defaults`; `version`, `commit` and `latest_version` only for a logged-in caller (`null` otherwise) |
 | `GET /account` | user | Own name, role, email, theme |
+| `POST /password-reset` | anyone | `{ name }` (a name or an email): answers `202` the same for every name; `503` without a mail server, `429` when asked too often |
+| `POST /password-reset/confirm` | anyone | `{ token, password }` from the reset link (`…/reset-password#token=…`): `204`, or `400` for a used or expired link |
 | `GET /search?q=…&site=…` | user | Titles matching the text, on one site or all |
 | `GET /new/{site}` · `GET /popular/{site}` | user | Title lists |
 | `GET /new-episodes/{site}` | user | Newest episodes (AniWorld; empty elsewhere): `slug`, `title`, `season` (0 = films), `number`, `language`, `released` as the site shows it |

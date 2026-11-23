@@ -83,9 +83,9 @@ New episodes are queued in the language of the newest episode already downloaded
 
 When the queue is empty (nothing queued, nothing downloading), Kura asks Jellyfin once to scan the series folders that got new episodes: a finished season, a batch from Auto-Sync or a single episode. Only those folders are scanned, never the whole library, and several downloads in a row cause one scan, not one each. A failed download stays in the queue and does not hold the scan back. If Jellyfin mounts a library under another path, set **Path in Jellyfin** for that library under *Settings → Library*.
 
-## Settings → Users / User
+## Settings → Account
 
-Every account has **Your account**: change the name, the password (the current one is needed; other devices are logged out and the account's API keys are deleted) and an optional email address, which is stored but not used yet. **API keys** let other programs, such as Musubi, use Kura instead of logging in; a key is shown once when it is created and can do what the account can, except change the password or the keys. Admins see the list of all users below that; normal users only see their own account.
+Every account changes its name, its password (the current one is needed; other devices are logged out and the account's API keys are deleted) and an optional email address, which is where a password reset link goes; changing it also needs the current password. **API keys** let other programs, such as Musubi, use Kura instead of logging in; a key is shown once when it is created and can do what the account can, except change the password, the email or the keys.
 
 ## Settings → Theme
 
@@ -95,11 +95,30 @@ Per account:
 - **ASCII background** (off by default): a faint animated scene from [ascii.rest](https://ascii.rest) behind the pages, picked from your own list. Paste the link of any piece (e.g. `https://ascii.rest/aurora-fjord/`) to add it; pieces with colour keep it, washed out. Every piece ships with Kura, so nothing is loaded from ascii.rest.
 - **Readability over the background** (admins, for all accounts): *Frosted glass* (default) softens and dims the picture behind a sheet of glass; *Text halo* keeps the picture sharp and gives letters a dark glow.
 
-## Settings → Users (admins)
+## Settings → Administration (admins)
 
-Add and remove accounts. See [[Roles and Requests|Roles-and-Requests]].
+The menu opens to four parts:
 
-## Settings → Administration
+- **Users**: every account with its role and email. Click one to set its email (for password reset) or delete it; **Add a user** opens a form for name, optional email, password and role. See [[Roles and Requests|Roles-and-Requests]].
+- **Mail**: the mail server Kura sends password reset links through. Until one is set up, the login page offers no *Forgot password?* (see below).
+- **Configuration**: export / import of all settings, libraries and Auto-Sync exclusions as one JSON file. Accounts, passwords and the mail server are not included.
+- **Network**: shows the public address the server reaches the internet from, e.g. to confirm a VPN. It asks api.ipify.org, only when you press the button.
 
-- **Export / Import**: all settings, libraries and Auto-Sync exclusions as one JSON file. Accounts and passwords are not included.
-- **IP check**: shows the public address the server reaches the internet from, e.g. to confirm a VPN. It asks api.ipify.org, only when you press the button.
+### Mail server
+
+| Field | Example | Notes |
+|---|---|---|
+| Mail server | `smtp.example.org` | The name only, no `smtp://`. |
+| Port | `587` | 587 with STARTTLS (the usual), 465 with TLS, 25 for a relay in your own network. |
+| Encryption | STARTTLS | STARTTLS is required, not optional. *None* sends no password, so it only works with a relay that asks for none. Certificates are always checked. |
+| User name / Password | `noreply@example.org` / app password | The password is stored but never shown again; leave the field empty to keep it. It is kept only while server, port, encryption and user name stay the same. |
+| Sender | `Kura <noreply@example.org>` | The *From* of every mail. |
+| Kura's address | `https://kura.example.org` | Links in mails start with it, so it must be the address people open Kura under. *Use this one* fills in the address of the open page. |
+
+**Proton Mail** (paid plans with SMTP submission): press *Proton Mail* to fill in `smtp.protonmail.ch`, port 587, STARTTLS. Create an SMTP token in Proton under *Settings → IMAP/SMTP → SMTP tokens*; the address it belongs to is the user name, the token the password, and the sender must be that address.
+
+**Send a test mail** (shown once the mail server is saved) sends a mail in Kura's design and shows the mail server's answer if it fails. *Switch mail off* forgets the mail server and its password.
+
+### Password reset
+
+With a mail server set up, the login page shows **Forgot password?**. Anyone enters a name or an email address; if an account with an email matches, a link is sent there. The page answers the same way whether or not the account exists. The link works once and for 30 minutes; a new link for the same account is sent at most every 2 minutes, and one address may ask 5 times before it has to wait. Setting a new password with it logs the account out everywhere, deletes its API keys and ends other links.

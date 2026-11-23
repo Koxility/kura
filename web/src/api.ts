@@ -89,6 +89,26 @@ export interface Account extends User {
   theme: Theme;
 }
 
+/** A user as admins see them in Administration → Users. */
+export interface UserEntry extends User {
+  email: string | null;
+}
+
+export type MailEncryption = "starttls" | "tls" | "none";
+
+/** The mail server for password reset mails. The password itself never comes back. */
+export interface MailSettings {
+  host: string;
+  port: number;
+  encryption: MailEncryption;
+  username: string;
+  password_set: boolean;
+  from: string;
+  /** Kura's own address; links in mails start with it. */
+  public_url: string;
+  enabled: boolean;
+}
+
 /** A key another program (e.g. Musubi) sends instead of logging in. */
 export interface ApiKey {
   id: number;
@@ -192,6 +212,8 @@ export interface Status {
   /** A newer release on GitHub, like `1.2.0`; absent while this one is the newest. */
   latest_version: string | null;
   needs_library: boolean;
+  /** Whether the login page offers "Forgot password?": a mail server is set up. */
+  password_reset: boolean;
   suggested_library_path: string | null;
   /** Sites that are switched on. */
   sites: Site[];

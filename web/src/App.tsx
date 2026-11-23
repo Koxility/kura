@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { Link, Navigate, NavLink, Route, Routes } from "react-router";
+import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router";
 import {
   api,
   type Job,
@@ -19,6 +19,7 @@ import { LibraryPage } from "./pages/Library";
 import { LibrarySetup } from "./pages/LibrarySetup";
 import { Queue } from "./pages/Queue";
 import { Requests } from "./pages/Requests";
+import { ResetPassword } from "./pages/Reset";
 import { SeriesPage } from "./pages/SeriesPage";
 import { SettingsPage } from "./pages/Settings";
 import { ThemeEffects } from "./ThemeEffects";
@@ -36,6 +37,9 @@ const pages = [
 
 export function App() {
   const status = useQuery(statusQuery);
+  const { pathname } = useLocation();
+  // A reset link opens this page whether or not someone is logged in on this device.
+  if (pathname === "/reset-password") return <ResetPassword />;
   if (status.isPending) return null;
   if (status.isError) {
     return (
@@ -44,7 +48,9 @@ export function App() {
       </p>
     );
   }
-  if (!status.data.user) return <Auth setup={status.data.needs_setup} />;
+  if (!status.data.user) {
+    return <Auth setup={status.data.needs_setup} passwordReset={status.data.password_reset} />;
+  }
   return <Shell status={status.data} />;
 }
 
@@ -178,7 +184,7 @@ function Pages({ needsLibrary, user }: { needsLibrary: boolean; user: User }) {
               <Route path="/auto-sync" element={<AutoSyncPage />} />
             </>
           )}
-          <Route path="/settings/:section?" element={<SettingsPage user={user} />} />
+          <Route path="/settings/:section?/:part?" element={<SettingsPage user={user} />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/queue" element={<Queue admin={user.role === "admin"} />} />
           <Route path="/requests" element={<Requests admin={user.role === "admin"} />} />

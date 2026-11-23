@@ -254,6 +254,162 @@
   align-items: end;
 }
 
+/* Administration and its parts: the parts sit indented under it while it is open. */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.group > .section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chevron {
+  color: var(--text-3);
+  font-size: var(--size-xs);
+}
+
+.parts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 4px 12px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+
+.part {
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  color: var(--text-3);
+  font-size: var(--size-s);
+  transition:
+    color var(--fast),
+    background var(--fast);
+}
+
+.part:hover {
+  color: var(--text);
+}
+
+.part[aria-current="page"] {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* "Administration" above the part's heading. */
+.crumb {
+  margin: 0 0 4px;
+  color: var(--text-3);
+  font-size: var(--size-xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* A section that opens on click, e.g. "Add a user". */
+.expander {
+  margin-top: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--control-fill);
+}
+
+.summary,
+.userSummary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.summary::-webkit-details-marker,
+.userSummary::-webkit-details-marker {
+  display: none;
+}
+
+.summary {
+  padding: 12px 16px;
+  font-size: var(--size-m);
+  font-weight: 500;
+}
+
+.summary::before,
+.userSummary::before {
+  content: "▸";
+  color: var(--text-3);
+  font-size: var(--size-xs);
+}
+
+details[open] > .summary::before,
+details[open] > .userSummary::before {
+  content: "▾";
+}
+
+.summary:hover,
+.userSummary:hover {
+  color: var(--text);
+}
+
+.expanded {
+  display: grid;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.expander > .oneLine.expanded {
+  margin-top: 0;
+}
+
+/* One user per row; it opens to its email and delete. */
+.userRow {
+  border-bottom: 1px solid var(--line);
+}
+
+.userSummary {
+  padding: 12px 0;
+  font-size: var(--size-m);
+}
+
+.userRow > .expanded {
+  padding: 0 0 16px 22px;
+}
+
+.userEmail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--size-s);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mail {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.mail .hint {
+  margin-top: -4px;
+}
+
+.mail .oneLine {
+  margin-top: 0;
+}
+
+/* Server and port side by side. */
+.pair {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
 @media (max-width: 860px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
@@ -273,6 +429,24 @@
   .oneLine,
   .musicFields {
     grid-template-columns: 1fr;
+  }
+
+  /* On a phone the parts follow Administration in the same wrapping row. */
+  .group {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .parts {
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .userEmail {
+    display: none;
   }
 }
 

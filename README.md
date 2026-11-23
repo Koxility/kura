@@ -86,7 +86,7 @@ To update, run `docker compose pull && docker compose up -d`. The top bar shows 
 1. Open `http://<your server>:8787` and create the admin account.
 2. Set up the first library: a name and a folder. With Docker this is a path inside the container, like `/media`. Kura creates the folder if it does not exist.
 3. Search for a title on Home, open it, pick episodes or seasons and press Download.
-4. Add more users under Settings → Users. They can browse and request; you decide in Request.
+4. Add more users under Settings → Administration → Users. They can browse and request; you decide in Request.
 
 ## Using Kura
 

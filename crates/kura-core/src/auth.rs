@@ -178,6 +178,14 @@ impl Core {
         Ok(true)
     }
 
+    /// Whether `password` is the user's current one.
+    pub async fn check_own_password(&self, user: &User, password: &str) -> Result<bool> {
+        let Some((_, stored)) = self.store.credentials(&user.name)? else {
+            return Ok(false);
+        };
+        verify(password, stored).await
+    }
+
     pub fn logout(&self, token: &str) -> Result<()> {
         Ok(self.store.delete_session(&token_hash(token))?)
     }

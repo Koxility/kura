@@ -4,7 +4,7 @@
 
 Open Kura in your browser (`http://<your server>:8787`). The first page asks for a name and a password (at least 8 characters). This account is the admin: it manages settings, libraries, users and requests.
 
-There is no way to recover a forgotten admin password from the web app. Choose one you keep, or create a second admin later under Settings → Users.
+To reset a forgotten password by mail later, give the account an email address (Settings → Account) and set up a mail server under Settings → Administration → Mail. Without that, choose a password you keep, or create a second admin.
 
 ## 2. First library
 
@@ -29,4 +29,4 @@ Progress shows on **Queue**. Finished episodes appear under **Library** and in J
 
 ## 4. More users
 
-Settings → Users → name, password and role. Normal users browse and request; see [[Roles and Requests|Roles-and-Requests]].
+Settings → Administration → Users → *Add a user*: name, optional email, password and role. Normal users browse and request; see [[Roles and Requests|Roles-and-Requests]].

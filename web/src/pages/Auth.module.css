@@ -20,3 +20,37 @@
   font-size: clamp(40px, 8vw, 56px);
   letter-spacing: -0.05em;
 }
+
+/* "Forgot password?" and "Back to login" under the form. */
+.aside {
+  margin: 20px 0 0;
+  color: var(--text-3);
+  font-size: var(--size-s);
+  text-align: center;
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.link:hover {
+  color: var(--text);
+}
+
+/* The answer after a link was asked for or a password was set. */
+.sent {
+  margin: 24px 0 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-2);
+  text-align: center;
+}

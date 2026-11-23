@@ -5,7 +5,7 @@
 //! is never told: the answer to a reset request is the same for everyone, and the mail goes
 //! out after the answer.
 
-use std::{net::IpAddr, str::FromStr, time::Duration};
+use std::{net::IpAddr, str::FromStr, sync::Arc, time::Duration};
 
 use kura_domain::{Mail, MailEncryption, UserEntry};
 use lettre::{
@@ -50,8 +50,14 @@ impl Core {
         if mail.host.is_empty() {
             mail = Mail::default();
         } else if mail.password.is_empty() {
+            // Only for the very same server and account: otherwise the stored password would
+            // go to whatever server is entered, and an admin could read it that way.
             let stored = self.store.mail()?;
-            if !stored.username.is_empty() && stored.username == mail.username {
+            let same = stored.host.eq_ignore_ascii_case(&mail.host)
+                && stored.port == mail.port
+                && stored.encryption == mail.encryption
+                && stored.username == mail.username;
+            if same && !stored.username.is_empty() {
                 mail.password = stored.password;
             }
         }
@@ -90,18 +96,34 @@ impl Core {
         Ok(self.store.mail()?.enabled())
     }
 
-    /// Someone asks for a reset link for a name or an email address. Answers the same way
-    /// whether or not such an account exists; the mail is sent afterwards, in the background.
-    pub fn request_password_reset(&self, name_or_email: &str, from: IpAddr) -> Result<()> {
-        let mail = self.store.mail()?;
-        if !mail.enabled() {
+    /// Someone asks for a reset link for a name or an email address. Answers the same way,
+    /// and after the same work, whether or not such an account exists: looking the account up,
+    /// making the link and sending the mail all happen afterwards, in the background.
+    pub fn request_password_reset(
+        self: &Arc<Self>,
+        name_or_email: &str,
+        from: IpAddr,
+    ) -> Result<()> {
+        if !self.store.mail()?.enabled() {
             return Err(CoreError::MailNotSetUp);
         }
         self.count_reset_request(from)?;
-        let wanted = name_or_email.trim();
+        let wanted = name_or_email.trim().to_owned();
         if wanted.is_empty() || wanted.chars().count() > MOST_NAME {
             return Ok(());
         }
+        let core = self.clone();
+        tokio::spawn(async move {
+            if let Err(err) = core.send_reset_links(&wanted) {
+                tracing::warn!("a password reset could not be prepared: {err}");
+            }
+        });
+        Ok(())
+    }
+
+    /// Makes a link for each account `wanted` names that has an email, and sends it.
+    fn send_reset_links(&self, wanted: &str) -> Result<()> {
+        let mail = self.store.mail()?;
         let now = now();
         for user in self.store.users_named(wanted)? {
             let Some(email) = user.email.clone() else {
@@ -232,11 +254,14 @@ async fn send_reset(mail: &Mail, user: &UserEntry, email: &str, link: &str) -> R
         heading: "Reset your password".into(),
         paragraphs: vec![
             format!("Hello {},", user.name),
-            "someone asked to reset the password of your Kura account. Choose a new one with this button:".into(),
+            "someone asked to reset the password of your Kura account. Choose a new one here:"
+                .into(),
         ],
         button: Some(("Choose a new password".into(), link.to_owned())),
         after: vec![
-            format!("The link works once and for {minutes} minutes. Afterwards you are logged out everywhere, and the account's API keys are deleted."),
+            format!(
+                "The link works once and for {minutes} minutes. Afterwards you are logged out everywhere, and the account's API keys are deleted."
+            ),
             "If you did not ask for this, ignore this mail: your password stays as it is.".into(),
         ],
     };
@@ -373,7 +398,9 @@ fn describe(err: &lettre::transport::smtp::Error) -> String {
     if err.is_timeout() {
         return "the mail server did not answer in time".into();
     }
-    if err.is_tls() {
+    // lettre repeats its prefix for nested errors.
+    let detail = detail.replace("Connection error: Connection error: ", "Connection error: ");
+    if err.is_tls() || detail.contains("certificate") {
         return format!("the encrypted connection to the mail server failed: {detail}");
     }
     format!("the mail server answered: {detail}")

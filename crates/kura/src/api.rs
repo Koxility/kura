@@ -302,7 +302,7 @@ fn in_browser(session: &Session) -> ApiResult<&str> {
     session.token.as_deref().ok_or_else(|| {
         error(
             StatusCode::FORBIDDEN,
-            "log in with your password to change the password or API keys",
+            "log in with your password to change the password, the email or API keys",
         )
     })
 }
@@ -536,6 +536,10 @@ async fn rename(
 struct NewEmail {
     #[serde(default)]
     email: String,
+    /// The current password: the email decides where reset links go, so changing it is as
+    /// much as changing the password.
+    #[serde(default)]
+    password: String,
 }
 
 async fn set_email(
@@ -543,6 +547,16 @@ async fn set_email(
     session: Session,
     Json(form): Json<NewEmail>,
 ) -> ApiResult<Json<Account>> {
+    in_browser(&session)?;
+    if !core
+        .check_own_password(&session.user, &form.password)
+        .await?
+    {
+        return Err(error(
+            StatusCode::FORBIDDEN,
+            "the current password is wrong",
+        ));
+    }
     core.set_email(&session.user, &form.email)?;
     Ok(Json(core.account(&session.user)?))
 }
@@ -679,12 +693,17 @@ struct EmailForm {
     email: String,
 }
 
+/// Logged in with a password, not an API key: the email decides where reset links go.
 async fn set_user_email(
     State(core): App,
-    _: Admin,
+    session: Session,
     Path(id): Path<i64>,
     Json(form): Json<EmailForm>,
 ) -> ApiResult<StatusCode> {
+    if session.user.role != Role::Admin {
+        return Err(error(StatusCode::FORBIDDEN, "only an admin can do this"));
+    }
+    in_browser(&session)?;
     if core.set_user_email(id, &form.email)? {
         Ok(StatusCode::NO_CONTENT)
     } else {

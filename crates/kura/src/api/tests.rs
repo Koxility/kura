@@ -629,7 +629,7 @@ async fn every_user_changes_their_own_account() {
     assert_eq!(renamed.await.1["name"], "Samira");
     server.log_in("/login", "samira", "correct horse").await;
 
-    let bad = json!({ "email": "not an address" });
+    let bad = json!({ "email": "not an address", "password": "correct horse" });
     assert_eq!(
         server
             .call(Method::PUT, "/account/email", &sam, bad)
@@ -637,12 +637,17 @@ async fn every_user_changes_their_own_account() {
             .0,
         400
     );
-    let email = json!({ "email": "sam@example.org" });
+    // The email decides where reset links go: it needs the current password.
+    let unproven = json!({ "email": "sam@example.org" });
+    let refused = server.call(Method::PUT, "/account/email", &sam, unproven);
+    assert_eq!(refused.await.0, 403);
+    let email = json!({ "email": "sam@example.org", "password": "correct horse" });
     let (_, account) = server
         .call(Method::PUT, "/account/email", &sam, email)
         .await;
     assert_eq!(account["email"], "sam@example.org");
-    let cleared = server.call(Method::PUT, "/account/email", &sam, json!({ "email": "" }));
+    let none = json!({ "email": "", "password": "correct horse" });
+    let cleared = server.call(Method::PUT, "/account/email", &sam, none);
     assert_eq!(cleared.await.1["email"], Value::Null);
 
     let theme = json!({ "music": false, "ascii": true, "ascii_piece": "tokyo-rain" });
@@ -1162,4 +1167,84 @@ async fn admins_manage_emails_and_send_a_test_mail() {
             .starts_with("the mail server"),
         "{answer}"
     );
+}
+
+/// Audit finding: a key that got out set its account's email and took the account over with
+/// a reset link. Neither a key nor a session without the password can move the email now.
+#[tokio::test]
+async fn a_key_cannot_redirect_reset_links() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let (port, _mails) = fake_mail_server().await;
+    server
+        .call(Method::PUT, "/admin/mail", &admin, plain_mail_server(port))
+        .await;
+    let user = json!({ "name": "sam", "password": "correct horse", "role": "user" });
+    let (_, sam) = server.call(Method::POST, "/users", &admin, user).await;
+    let id = sam["id"].as_i64().unwrap();
+    let mut keys = Vec::new();
+    for (who, password) in [("sam", "correct horse"), ("admin", "correct horse")] {
+        let session = server.log_in("/login", who, password).await;
+        let (_, key) = server
+            .call(
+                Method::POST,
+                "/account/keys",
+                &session,
+                json!({ "name": "Musubi" }),
+            )
+            .await;
+        keys.push(key["secret"].as_str().unwrap().to_owned());
+    }
+    let with_key = |key: &str, path: &str, body: Value| {
+        let url = format!("{}/api/v1{path}", server.base);
+        let request = server.http.put(url).bearer_auth(key.to_owned()).json(&body);
+        async move { request.send().await.unwrap().status().as_u16() }
+    };
+    let attacker = json!({ "email": "attacker@example.net", "password": "correct horse" });
+    assert_eq!(
+        with_key(&keys[0], "/account/email", attacker.clone()).await,
+        403
+    );
+    // An admin's key cannot redirect someone else's links either.
+    assert_eq!(
+        with_key(&keys[1], &format!("/users/{id}/email"), attacker).await,
+        403
+    );
+    let (_, users) = server.get("/users", &admin).await;
+    assert_eq!(users[1]["email"], Value::Null);
+}
+
+/// Audit finding: the stored mail password went along to whatever server was entered next.
+#[tokio::test]
+async fn the_mail_password_stays_with_its_server() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let proton = json!({
+        "host": "smtp.protonmail.ch", "port": 587, "encryption": "starttls",
+        "username": "noreply@example.org", "password": "token-secret",
+        "from": "Kura <noreply@example.org>", "public_url": "https://kura.example.org",
+    });
+    server
+        .call(Method::PUT, "/admin/mail", &admin, proton.clone())
+        .await;
+    let mut same = proton.clone();
+    same["password"] = json!("");
+    let (_, kept) = server
+        .call(Method::PUT, "/admin/mail", &admin, same.clone())
+        .await;
+    assert_eq!(kept["password_set"], true);
+    for (field, value) in [
+        ("host", json!("smtp.attacker.example")),
+        ("port", json!(2587)),
+        ("encryption", json!("tls")),
+        ("username", json!("other@example.org")),
+    ] {
+        server
+            .call(Method::PUT, "/admin/mail", &admin, proton.clone())
+            .await;
+        let mut moved = same.clone();
+        moved[field] = value;
+        let (_, saved) = server.call(Method::PUT, "/admin/mail", &admin, moved).await;
+        assert_eq!(saved["password_set"], false, "{field}");
+    }
 }

@@ -85,12 +85,26 @@ fn newer(tag: &str) -> Option<String> {
 
 /// Compares versions like `v0.2.0` and `0.1.9` number by number.
 fn is_newer(latest: &str, current: &str) -> bool {
-    let numbers = |version: &str| -> Option<Vec<u32>> {
+    // `1.4.0-beta.1` is the numbers and whether it is a pre-release, which comes before the
+    // release with the same numbers: a beta install hears of its release.
+    let parse = |version: &str| -> Option<(Vec<u32>, bool)> {
         let version = version.trim().trim_start_matches('v');
-        version.split('.').map(|part| part.parse().ok()).collect()
+        let (numbers, pre) = match version.split_once('-') {
+            Some((numbers, _)) => (numbers, true),
+            None => (version, false),
+        };
+        let numbers = numbers
+            .split('.')
+            .map(|part| part.parse().ok())
+            .collect::<Option<_>>()?;
+        Some((numbers, pre))
     };
-    match (numbers(latest), numbers(current)) {
-        (Some(latest), Some(current)) => latest > current,
+    match (parse(latest), parse(current)) {
+        // A pre-release is never offered as an update.
+        (Some((_, true)), _) => false,
+        (Some((latest, false)), Some((current, current_pre))) => {
+            latest > current || (latest == current && current_pre)
+        }
         // A tag that is not a version says nothing.
         _ => false,
     }
@@ -118,6 +132,11 @@ mod tests {
         assert!(!is_newer("v0.1.0", "0.1.0"));
         assert!(!is_newer("0.0.9", "0.1.0"));
         assert!(!is_newer("nightly", "0.1.0"));
+        // A beta install hears of the release it leads to, and of later ones.
+        assert!(is_newer("v1.4.0", "1.4.0-beta.1"));
+        assert!(is_newer("v1.4.1", "1.4.0-beta.1"));
+        assert!(!is_newer("v1.3.5", "1.4.0-beta.1"));
+        assert!(!is_newer("v1.4.0-beta.2", "1.4.0"));
         assert!(!is_newer("v1.0.0-beta", "0.1.0"));
         // This build is never newer than itself.
         assert_eq!(newer(&format!("v{}", env!("CARGO_PKG_VERSION"))), None);
