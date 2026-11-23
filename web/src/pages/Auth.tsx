@@ -98,10 +98,6 @@ function Forgot({ onBack }: { onBack: () => void }) {
     <main className={styles.page}>
       <form className={styles.form} onSubmit={onSubmit}>
         <h1>Kura</h1>
-        <p className={ui.lead}>
-          Enter your name or email address. If your account has an email address, a link to choose
-          a new password is sent there.
-        </p>
         {ask.isSuccess ? (
           <p className={styles.sent} role="status">
             {ask.data.message}

@@ -1098,7 +1098,7 @@ dependencies = [
 
 [[package]]
 name = "kura"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1120,7 +1120,7 @@ dependencies = [
 
 [[package]]
 name = "kura-core"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "argon2",
  "async-trait",
@@ -1144,7 +1144,7 @@ dependencies = [
 
 [[package]]
 name = "kura-domain"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1153,7 +1153,7 @@ dependencies = [
 
 [[package]]
 name = "kura-download"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "kura-domain",
  "tempfile",
@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "kura-hosters"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1178,7 +1178,7 @@ dependencies = [
 
 [[package]]
 name = "kura-sites"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "async-trait",
  "kura-domain",
@@ -1193,7 +1193,7 @@ dependencies = [
 
 [[package]]
 name = "kura-store"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "kura-domain",
  "rusqlite",

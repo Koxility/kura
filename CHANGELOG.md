@@ -4,6 +4,13 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-23
+
+### Changed
+
+- The *Forgot password?* page is shorter: just the field for a name or email and *Send link*.
+- The "Kura" at the top of every mail (password reset, invite, test mail) is larger.
+
 ## [1.5.0] - 2026-11-23
 
 Replaces 1.4.1, which carried these changes under the wrong version number.
@@ -331,7 +338,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/Koxility/kura/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/Koxility/kura/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/Koxility/kura/compare/v1.3.5...v1.4.0
 [1.3.5]: https://github.com/Koxility/kura/compare/v1.3.4...v1.3.5
