@@ -4,17 +4,29 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
-### Added (1.4.0, beta)
+## [1.4.0] - 2026-11-23
+
+### Added
 
 - **Password reset by mail.** With a mail server set up, the login page offers *Forgot password?*: enter a name or email, and a link to choose a new password goes to the account's email. The answer is the same whether or not the account exists. A link works once and for 30 minutes; using it logs the account out everywhere and deletes its API keys. Only the SHA-256 of a link is stored, and the token sits after `#`, so it never reaches the server's or a proxy's logs.
 - **Mail server for admins** (*Settings → Administration → Mail*): server, port, STARTTLS / TLS / none, user name, password or app token, sender (e.g. `Kura <noreply@…>`) and Kura's own address for links. One click fills in Proton Mail's SMTP submission. The password is never shown again or exported; *Send a test mail* checks it all.
 - **Mails in Kura's design**: dark, with the indigo button, and a plain-text part for mail programs without HTML.
+- **Asked once for an email.** After logging in, an account without an email address sees a short card above the page: add one for password reset, or *Not now*. It is asked once per account, new or existing, and never again after either answer, on any device. Right after logging in, no password is needed to save it; later the card asks for it.
 
-### Changed (1.4.0, beta)
+### Changed
 
 - **Administration has parts**: *Users*, *Mail*, *Configuration* (export / import) and *Network* (IP check), listed under it in the Settings menu. User management moved there from *Settings → Users*: each user opens to set their email or delete them, and *Add a user* takes an optional email.
 - *Settings → Users* is now *Settings → Account* for everyone (the old link still works).
-- Changing your email needs your current password, and API keys cannot change it: the email decides where reset links go.
+- Changing your email needs your current password (not in the first 10 minutes after logging in), and API keys cannot change it: the email decides where reset links go.
+- The update notice: a pre-release install is told about its release; pre-releases are never offered as an update.
+
+### Security
+
+Found in the security audit of the new reset flow before release, and fixed:
+
+- **A leaked API key could take over its account**: set the account's email to its own address, ask for a reset link and choose a new password. Keys can no longer change the email, and a session needs the current password for it (or a login from the last 10 minutes).
+- **The stored mail password went along to any new mail server**, so an admin could have it sent to a server of their own. It is now kept only while server, port, encryption and user name stay the same.
+- **Reset requests for existing accounts took slightly longer** (about 1.6 ms), which could tell which names exist. All work for an account now happens after the answer.
 
 ## [1.3.5] - 2026-11-23
 
@@ -300,7 +312,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.3.5...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/Koxility/kura/compare/v1.3.5...v1.4.0
 [1.3.5]: https://github.com/Koxility/kura/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/Koxility/kura/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/Koxility/kura/compare/v1.3.2...v1.3.3

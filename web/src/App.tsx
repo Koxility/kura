@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router";
 import {
+  type Account,
+  accountQuery,
   api,
   type Job,
   type LiveEvent,
@@ -120,6 +122,7 @@ function Shell({ status }: { status: Status }) {
       </header>
       <ThemeEffects />
       <main className={styles.main}>
+        <EmailPrompt mailOn={status.password_reset} />
         {status.needs_library && admin ? (
           <LibrarySetup suggestedPath={status.suggested_library_path} />
         ) : (
@@ -128,6 +131,94 @@ function Shell({ status }: { status: Status }) {
       </main>
       <Footer status={status} />
     </>
+  );
+}
+
+/** Asks once, after login, for an email address to send a reset link to. Optional: "Not now"
+ *  ends it for good, on every device. Right after logging in no password is needed; later the
+ *  server asks for it and the card shows the field. */
+function EmailPrompt({ mailOn }: { mailOn: boolean }) {
+  const client = useQueryClient();
+  const account = useQuery(accountQuery);
+  const { pathname } = useLocation();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [needsPassword, setNeedsPassword] = useState(false);
+  const done = (next?: Account) => {
+    if (next) client.setQueryData(accountQuery.queryKey, next);
+    else client.invalidateQueries({ queryKey: accountQuery.queryKey });
+  };
+  const save = useMutation({
+    mutationFn: () => api<Account>("/account/email", "PUT", { email, password }),
+    onSuccess: done,
+    onError: (error) => {
+      if (error.message.includes("password")) setNeedsPassword(true);
+    },
+  });
+  const skip = useMutation({
+    mutationFn: () => api("/account/email/skip", "POST"),
+    onSuccess: () => done(),
+  });
+  // The account page has its own email field.
+  if (!account.data?.ask_email || pathname === "/settings/account") return null;
+
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    save.mutate();
+  }
+
+  return (
+    <form className={styles.prompt} onSubmit={onSubmit} aria-labelledby="email-prompt">
+      <div className={styles.promptText}>
+        <h2 id="email-prompt">Add an email address?</h2>
+        <p>
+          {mailOn
+            ? "If you forget your password, a link to choose a new one is sent there."
+            : "If you forget your password, a link to choose a new one can be sent there once an admin sets up mail."}{" "}
+          Optional; you can also add it later under Settings → Account.
+        </p>
+      </div>
+      <div className={styles.promptFields}>
+        <input
+          className={ui.input}
+          type="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="you@example.org"
+          autoComplete="email"
+          aria-label="Email"
+          required
+        />
+        {needsPassword && (
+          <input
+            className={ui.input}
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Current password"
+            autoComplete="current-password"
+            aria-label="Current password"
+            required
+          />
+        )}
+        <button className={ui.primary} disabled={save.isPending}>
+          Save
+        </button>
+        <button
+          type="button"
+          className={ui.ghost}
+          disabled={skip.isPending}
+          onClick={() => skip.mutate()}
+        >
+          Not now
+        </button>
+      </div>
+      {(save.isError || skip.isError) && (
+        <p className={ui.error} role="alert">
+          {(save.error ?? skip.error)?.message}
+        </p>
+      )}
+    </form>
   );
 }
 

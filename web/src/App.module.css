@@ -204,3 +204,44 @@
   font-size: var(--size-xs);
   font-weight: 600;
 }
+
+/* The one-time question for an email address, above the page. */
+.prompt {
+  display: grid;
+  gap: 12px;
+  max-width: var(--content);
+  margin: 24px auto 0;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.promptText h2 {
+  margin: 0 0 4px;
+  font-size: var(--size-m);
+  font-weight: 600;
+}
+
+.promptText p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--size-s);
+}
+
+.promptFields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.promptFields input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.prompt [role="alert"] {
+  margin: 0;
+  text-align: left;
+}

@@ -87,6 +87,8 @@ export interface Account extends User {
   /** Stored, not used yet. */
   email: string | null;
   theme: Theme;
+  /** Asked once after login to add an email: none is set and "not now" was not chosen yet. */
+  ask_email: boolean;
 }
 
 /** A user as admins see them in Administration → Users. */

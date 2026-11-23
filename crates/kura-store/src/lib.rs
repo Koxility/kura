@@ -117,6 +117,9 @@ CREATE TABLE password_resets (
 );
 ";
 
+/// Added in 1.4.0: whether an account was already asked for an email address after login.
+const EMAIL_ASKED: &str = "ALTER TABLE users ADD COLUMN email_asked INTEGER NOT NULL DEFAULT 0;";
+
 const JOB_COLUMNS: &str = "id, site, slug, season, episode, series_title, state, progress, error, path, \
      language, hoster, dir, hidden, queued_at, imdb_id, started_at";
 
@@ -179,6 +182,7 @@ impl Store {
             M::up(STARTED_AT),
             M::up(ACCOUNTS),
             M::up(MAIL_AND_RESETS),
+            M::up(EMAIL_ASKED),
         ])
         .to_latest(&mut conn)?;
         Ok(Self {
@@ -260,7 +264,7 @@ impl Store {
         Ok(self
             .conn()
             .query_row(
-                "SELECT id, name, role, email, theme FROM users WHERE id = ?1",
+                "SELECT id, name, role, email, theme, email_asked FROM users WHERE id = ?1",
                 [id],
                 |row| {
                     let theme: Option<String> = row.get(4)?;
@@ -273,6 +277,8 @@ impl Store {
                         theme: theme
                             .and_then(|json| serde_json::from_str(&json).ok())
                             .unwrap_or_default(),
+                        ask_email: row.get::<_, Option<String>>(3)?.is_none()
+                            && !row.get::<_, bool>(5)?,
                     })
                 },
             )
@@ -293,10 +299,17 @@ impl Store {
     pub fn set_email(&self, id: i64, email: Option<&str>) -> Result<()> {
         let conn = self.conn();
         conn.execute(
-            "UPDATE users SET email = ?2 WHERE id = ?1",
+            "UPDATE users SET email = ?2, email_asked = 1 WHERE id = ?1",
             params![id, email],
         )?;
         conn.execute("DELETE FROM password_resets WHERE user_id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// The account was asked for an email after login and said "not now"; it is not asked again.
+    pub fn mark_email_asked(&self, id: i64) -> Result<()> {
+        self.conn()
+            .execute("UPDATE users SET email_asked = 1 WHERE id = ?1", [id])?;
         Ok(())
     }
 
@@ -499,6 +512,18 @@ impl Store {
         conn.execute("DELETE FROM api_keys WHERE user_id = ?1", [user_id])?;
         conn.execute("DELETE FROM password_resets WHERE user_id = ?1", [user_id])?;
         Ok(())
+    }
+
+    /// When a session ends (Unix seconds); with its length, when it began.
+    pub fn session_expiry(&self, token_hash: &str) -> Result<Option<i64>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT expires_at FROM sessions WHERE token_hash = ?1",
+                [token_hash],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
 
     pub fn delete_session(&self, token_hash: &str) -> Result<()> {

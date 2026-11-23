@@ -272,6 +272,10 @@ pub struct Account {
     /// Where a password reset link is sent.
     pub email: Option<String>,
     pub theme: Theme,
+    /// Whether the web app asks once for an email address: none is set, and the account has
+    /// not said "not now" yet.
+    #[serde(default)]
+    pub ask_email: bool,
 }
 
 /// A user as admins see them in Administration → Users.

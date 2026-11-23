@@ -26,7 +26,7 @@ Sites are `aniworld` or `serienstream`; languages are `german_dub`, `german_sub`
 | Method and path | Who | What |
 |---|---|---|
 | `GET /status` | anyone | The caller (`user`, or `null`), enabled `sites`, `defaults`; `version`, `commit` and `latest_version` only for a logged-in caller (`null` otherwise) |
-| `GET /account` | user | Own name, role, email, theme |
+| `GET /account` | user | Own name, role, email, theme, and `ask_email` (the web app asks once for an email) |
 | `POST /password-reset` | anyone | `{ name }` (a name or an email): answers `202` the same for every name; `503` without a mail server, `429` when asked too often |
 | `POST /password-reset/confirm` | anyone | `{ token, password }` from the reset link (`…/reset-password#token=…`): `204`, or `400` for a used or expired link |
 | `GET /search?q=…&site=…` | user | Titles matching the text, on one site or all |

@@ -20,6 +20,9 @@ use crate::{Core, CoreError, Result};
 /// How long a login lasts, in seconds.
 pub const SESSION_TTL: i64 = 30 * 24 * 60 * 60;
 
+/// How long after logging in the password counts as just typed (seconds).
+pub const RECENT_LOGIN: i64 = 10 * 60;
+
 /// Passwords hashed or checked at the same time. Argon2 takes about 19 MiB each time, and
 /// logging in needs no account, so without a limit a burst of logins takes gigabytes.
 static HASHING: Semaphore = Semaphore::const_new(4);
@@ -176,6 +179,18 @@ impl Core {
         self.store
             .set_password(user.id, &hashed, &token_hash(token))?;
         Ok(true)
+    }
+
+    /// Whether the session began at most `RECENT_LOGIN` ago: right after typing the password,
+    /// that counts as having typed it again.
+    pub fn recent_login(&self, token: &str) -> Result<bool> {
+        let expiry = self.store.session_expiry(&token_hash(token))?;
+        Ok(expiry.is_some_and(|expires| now() - (expires - SESSION_TTL) <= RECENT_LOGIN))
+    }
+
+    /// The account said "not now" to adding an email address.
+    pub fn skip_email(&self, user: &User) -> Result<()> {
+        Ok(self.store.mark_email_asked(user.id)?)
     }
 
     /// Whether `password` is the user's current one.
@@ -435,6 +450,26 @@ mod tests {
     use kura_store::Store;
 
     use super::*;
+
+    #[test]
+    fn only_a_fresh_login_counts_as_the_password() {
+        let store = Store::open_in_memory().unwrap();
+        let user = store
+            .create_user("sam", "hash", Role::User)
+            .unwrap()
+            .unwrap();
+        // One session from just now, one from an hour ago.
+        store
+            .create_session(&token_hash("fresh"), user.id, now(), SESSION_TTL)
+            .unwrap();
+        store
+            .create_session(&token_hash("old"), user.id, now() - 3600, SESSION_TTL)
+            .unwrap();
+        let core = Core::with_defaults(store).unwrap();
+        assert!(core.recent_login("fresh").unwrap());
+        assert!(!core.recent_login("old").unwrap());
+        assert!(!core.recent_login("unknown").unwrap());
+    }
 
     const HOME: IpAddr = IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 20));
 

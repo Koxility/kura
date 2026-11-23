@@ -71,6 +71,7 @@ fn router(core: Arc<Core>) -> Router {
         .route("/account/password", put(change_password))
         .route("/account/name", put(rename))
         .route("/account/email", put(set_email))
+        .route("/account/email/skip", post(skip_email))
         .route("/account/theme", put(set_theme))
         .route("/account/keys", get(api_keys).post(create_api_key))
         .route("/account/keys/{id}", delete(delete_api_key))
@@ -547,18 +548,31 @@ async fn set_email(
     session: Session,
     Json(form): Json<NewEmail>,
 ) -> ApiResult<Json<Account>> {
-    in_browser(&session)?;
-    if !core
-        .check_own_password(&session.user, &form.password)
-        .await?
-    {
-        return Err(error(
-            StatusCode::FORBIDDEN,
-            "the current password is wrong",
-        ));
+    let token = in_browser(&session)?;
+    // Right after logging in, the password was just typed; that is what the prompt after the
+    // first login relies on. Later, it is asked again.
+    let proven = if form.password.is_empty() {
+        core.recent_login(token)?
+    } else {
+        core.check_own_password(&session.user, &form.password)
+            .await?
+    };
+    if !proven {
+        let message = if form.password.is_empty() {
+            "enter your current password to change the email"
+        } else {
+            "the current password is wrong"
+        };
+        return Err(error(StatusCode::FORBIDDEN, message));
     }
     core.set_email(&session.user, &form.email)?;
     Ok(Json(core.account(&session.user)?))
+}
+
+/// "Not now" to the email prompt after login; it is not shown again.
+async fn skip_email(State(core): App, session: Session) -> ApiResult<StatusCode> {
+    core.skip_email(&session.user)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn set_theme(

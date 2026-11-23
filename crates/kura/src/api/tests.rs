@@ -637,9 +637,10 @@ async fn every_user_changes_their_own_account() {
             .0,
         400
     );
-    // The email decides where reset links go: it needs the current password.
-    let unproven = json!({ "email": "sam@example.org" });
-    let refused = server.call(Method::PUT, "/account/email", &sam, unproven);
+    // The email decides where reset links go: it needs the current password (a wrong one is
+    // refused; right after logging in, none is needed, see `the_email_prompt_is_shown_once`).
+    let wrong = json!({ "email": "sam@example.org", "password": "wrong horse" });
+    let refused = server.call(Method::PUT, "/account/email", &sam, wrong);
     assert_eq!(refused.await.0, 403);
     let email = json!({ "email": "sam@example.org", "password": "correct horse" });
     let (_, account) = server
@@ -1247,4 +1248,58 @@ async fn the_mail_password_stays_with_its_server() {
         let (_, saved) = server.call(Method::PUT, "/admin/mail", &admin, moved).await;
         assert_eq!(saved["password_set"], false, "{field}");
     }
+}
+
+#[tokio::test]
+async fn the_email_prompt_is_shown_once() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    // The first admin is asked too.
+    assert_eq!(server.get("/account", &admin).await.1["ask_email"], true);
+    for name in ["sam", "kim"] {
+        let user = json!({ "name": name, "password": "correct horse", "role": "user" });
+        server.call(Method::POST, "/users", &admin, user).await;
+    }
+    let with_email = json!({ "name": "lee", "password": "correct horse", "role": "user", "email": "lee@example.org" });
+    server
+        .call(Method::POST, "/users", &admin, with_email)
+        .await;
+
+    // "Not now": gone, also after logging in again elsewhere.
+    let sam = server.log_in("/login", "sam", "correct horse").await;
+    assert_eq!(server.get("/account", &sam).await.1["ask_email"], true);
+    let skipped = server.call(Method::POST, "/account/email/skip", &sam, Value::Null);
+    assert_eq!(skipped.await.0, 204);
+    let elsewhere = server.log_in("/login", "sam", "correct horse").await;
+    assert_eq!(
+        server.get("/account", &elsewhere).await.1["ask_email"],
+        false
+    );
+
+    // Right after logging in, the email is set without typing the password again.
+    let kim = server.log_in("/login", "kim", "correct horse").await;
+    let email = json!({ "email": "kim@example.org" });
+    let (code, account) = server
+        .call(Method::PUT, "/account/email", &kim, email)
+        .await;
+    assert_eq!(code, 200);
+    assert_eq!(
+        (account["email"].as_str(), &account["ask_email"]),
+        (Some("kim@example.org"), &json!(false))
+    );
+    // An API key cannot, even of a fresh account.
+    let (_, key) = server
+        .call(Method::POST, "/account/keys", &kim, json!({ "name": "k" }))
+        .await;
+    let url = format!("{}/api/v1/account/email", server.base);
+    let by_key = server
+        .http
+        .put(url)
+        .bearer_auth(key["secret"].as_str().unwrap())
+        .json(&json!({ "email": "x@example.org" }));
+    assert_eq!(by_key.send().await.unwrap().status(), 403);
+
+    // An account with an email is never asked.
+    let lee = server.log_in("/login", "lee", "correct horse").await;
+    assert_eq!(server.get("/account", &lee).await.1["ask_email"], false);
 }
