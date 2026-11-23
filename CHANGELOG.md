@@ -4,7 +4,9 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
-## [1.4.1] - 2026-11-23
+## [1.5.0] - 2026-11-23
+
+Replaces 1.4.1, which carried these changes under the wrong version number.
 
 ### Added
 
@@ -329,8 +331,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.4.1...HEAD
-[1.4.1]: https://github.com/Koxility/kura/compare/v1.4.0...v1.4.1
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/Koxility/kura/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/Koxility/kura/compare/v1.3.5...v1.4.0
 [1.3.5]: https://github.com/Koxility/kura/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/Koxility/kura/compare/v1.3.3...v1.3.4

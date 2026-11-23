@@ -120,7 +120,7 @@ CREATE TABLE password_resets (
 /// Added in 1.4.0: whether an account was already asked for an email address after login.
 const EMAIL_ASKED: &str = "ALTER TABLE users ADD COLUMN email_asked INTEGER NOT NULL DEFAULT 0;";
 
-/// Added in 1.4.1: invitations by email. Only the SHA-256 of an invite link's token is kept; an
+/// Added in 1.5.0: invitations by email. Only the SHA-256 of an invite link's token is kept; an
 /// invite ends with the admin who sent it.
 const INVITES: &str = "
 CREATE TABLE invites (
