@@ -269,9 +269,58 @@ pub struct Account {
     pub id: i64,
     pub name: String,
     pub role: Role,
-    /// Stored for later use; nothing is sent to it yet.
+    /// Where a password reset link is sent.
     pub email: Option<String>,
     pub theme: Theme,
+}
+
+/// A user as admins see them in Administration → Users.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserEntry {
+    pub id: i64,
+    pub name: String,
+    pub role: Role,
+    pub email: Option<String>,
+}
+
+/// The mail server Kura sends password reset mails through, set by an admin. Kept apart from
+/// [`Settings`], so the exported configuration never holds the mail password.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Mail {
+    /// e.g. `smtp.protonmail.ch`. Empty while no mail server is set up.
+    pub host: String,
+    /// 587 for STARTTLS, 465 for TLS, 25 for a relay in the local network.
+    pub port: u16,
+    pub encryption: MailEncryption,
+    pub username: String,
+    /// The password or app token (ProtonMail: an SMTP token). Never sent back to the browser.
+    pub password: String,
+    /// Sender, e.g. `Kura <noreply@example.org>`.
+    pub from: String,
+    /// The address people open Kura under, e.g. `https://kura.example.org`; links in mails
+    /// start with it.
+    pub public_url: String,
+}
+
+impl Mail {
+    /// Whether mails can be sent at all.
+    pub fn enabled(&self) -> bool {
+        !self.host.is_empty() && !self.from.is_empty() && !self.public_url.is_empty()
+    }
+}
+
+/// How the connection to the mail server is protected.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MailEncryption {
+    /// Plain connection upgraded with STARTTLS, which is required (port 587, "submission").
+    #[default]
+    Starttls,
+    /// TLS from the first byte (port 465).
+    Tls,
+    /// No encryption: only for a relay in the local network.
+    None,
 }
 
 /// A user's look and sound of the web app.

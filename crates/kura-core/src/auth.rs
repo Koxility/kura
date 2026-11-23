@@ -112,9 +112,7 @@ impl Core {
         }
         self.login_tries().remove(&key);
 
-        let mut token = [0u8; 32];
-        getrandom::fill(&mut token).map_err(|err| CoreError::Hashing(err.to_string()))?;
-        let token = hex(&token);
+        let token = random_token()?;
         let hashed = token_hash(&token);
         self.store
             .create_session(&hashed, user.id, now(), SESSION_TTL)?;
@@ -122,7 +120,7 @@ impl Core {
     }
 
     /// Counts one login try, or refuses it while a pause is running.
-    fn count_try(&self, key: &(IpAddr, String)) -> Result<()> {
+    pub(crate) fn count_try(&self, key: &(IpAddr, String)) -> Result<()> {
         let now = Instant::now();
         let mut tries = self.login_tries();
         if tries.len() >= MOST_TRACKED && !tries.contains_key(key) {
@@ -199,20 +197,31 @@ impl Core {
 
     /// Stores an email address, or none for an empty one. Nothing is sent to it yet.
     pub fn set_email(&self, user: &User, email: &str) -> Result<()> {
+        self.set_email_of(user.id, email)
+    }
+
+    /// An admin sets the email of any user; `false` when there is no such user.
+    pub fn set_user_email(&self, id: i64, email: &str) -> Result<bool> {
+        if !self.store.users()?.iter().any(|user| user.id == id) {
+            return Ok(false);
+        }
+        self.set_email_of(id, email)?;
+        Ok(true)
+    }
+
+    /// Users' email entries; for admins.
+    pub fn user_entries(&self) -> Result<Vec<kura_domain::UserEntry>> {
+        Ok(self.store.user_entries()?)
+    }
+
+    fn set_email_of(&self, id: i64, email: &str) -> Result<()> {
         let email = email.trim();
-        let valid = email.len() <= 254
-            && email.split_once('@').is_some_and(|(local, domain)| {
-                !local.is_empty() && domain.contains('.') && !domain.starts_with('.')
-            })
-            && !email.contains(char::is_whitespace);
-        if !email.is_empty() && !valid {
-            return Err(CoreError::Invalid(
-                "this does not look like an email address",
-            ));
+        if !email.is_empty() {
+            check_email(email)?;
         }
         Ok(self
             .store
-            .set_email(user.id, Some(email).filter(|email| !email.is_empty()))?)
+            .set_email(id, Some(email).filter(|email| !email.is_empty()))?)
     }
 
     pub fn set_theme(&self, user: &User, theme: &Theme) -> Result<()> {
@@ -302,7 +311,7 @@ fn pause_after(count: u32) -> Option<Duration> {
 
 /// The address that counts for the limit. One customer usually holds a whole IPv6 `/64`, so
 /// its addresses count as one.
-fn network(address: IpAddr) -> IpAddr {
+pub(crate) fn network(address: IpAddr) -> IpAddr {
     match address {
         IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
             Some(v4) => IpAddr::V4(v4),
@@ -324,13 +333,43 @@ fn check_name(name: &str) -> Result<&str> {
 /// Returns the trimmed name.
 fn check<'a>(name: &'a str, password: &str) -> Result<&'a str> {
     let name = check_name(name)?;
+    check_password(password)?;
+    Ok(name)
+}
+
+/// An address a reset mail can go to: one line, `name@domain.tld`, as a mail server takes it.
+pub fn check_email(email: &str) -> Result<()> {
+    let email = email.trim();
+    let valid = email.len() <= 254
+        && email.split_once('@').is_some_and(|(local, domain)| {
+            !local.is_empty() && domain.contains('.') && !domain.starts_with('.')
+        })
+        && !email.contains(char::is_whitespace)
+        && crate::mail::address(email).is_ok();
+    if valid {
+        Ok(())
+    } else {
+        Err(CoreError::Invalid(
+            "this does not look like an email address",
+        ))
+    }
+}
+
+pub(crate) fn check_password(password: &str) -> Result<()> {
     // The upper limit keeps hashing cheap for anything a client sends.
     if !(8..=256).contains(&password.chars().count()) {
         return Err(CoreError::Invalid(
             "the password must have 8 to 256 characters",
         ));
     }
-    Ok(name)
+    Ok(())
+}
+
+/// 32 random bytes from the operating system, as 64 hex digits: for sessions and reset links.
+pub(crate) fn random_token() -> Result<String> {
+    let mut token = [0u8; 32];
+    getrandom::fill(&mut token).map_err(|err| CoreError::Hashing(err.to_string()))?;
+    Ok(hex(&token))
 }
 
 /// Checking takes tens of milliseconds, so it runs off the async threads.
@@ -348,7 +387,7 @@ async fn verify(password: &str, stored: String) -> Result<bool> {
 }
 
 /// Hashing takes tens of milliseconds, so it runs off the async threads.
-async fn hash(password: &str) -> Result<String> {
+pub(crate) async fn hash(password: &str) -> Result<String> {
     let _turn = hashing_turn().await?;
     let password = password.to_owned();
     let hashing = tokio::task::spawn_blocking(move || {
@@ -370,7 +409,7 @@ async fn hashing_turn() -> Result<tokio::sync::SemaphorePermit<'static>> {
 }
 
 /// Only the hash is stored, so a copy of the database holds no usable session.
-fn token_hash(token: &str) -> String {
+pub(crate) fn token_hash(token: &str) -> String {
     hex(&Sha256::digest(token.as_bytes()))
 }
 

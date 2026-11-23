@@ -6,6 +6,7 @@ mod auth;
 mod downloaded;
 mod jellyfin;
 mod library;
+mod mail;
 mod naming;
 mod net;
 mod requests;
@@ -20,7 +21,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-pub use auth::{API_KEY_PREFIX, SESSION_TTL};
+pub use auth::{API_KEY_PREFIX, SESSION_TTL, check_email};
 use kura_domain::{
     CalendarDay, Episode, EpisodeId, Genre, HosterLink, Job, JobState, Language, Library,
     NewEpisode, OutputFormat, RemovedTitle, Schedule, Series, SeriesSummary, Settings, SiteId,
@@ -32,6 +33,7 @@ pub use kura_sites::SiteError;
 use kura_sites::{AniWorld, SerienStream, Site};
 use kura_store::{NewJob, Store, StoreError};
 pub use library::{Entry, LibraryRoot};
+pub use mail::RESET_TTL;
 pub use naming::{DEFAULT_TEMPLATE, default_template};
 pub use net::REPOSITORY;
 use serde::Serialize;
@@ -70,6 +72,15 @@ pub enum CoreError {
     /// Jellyfin did not answer or refused; the text is shown to the admin.
     #[error("{0}")]
     Jellyfin(String),
+    /// No mail server is set up, so no mail can be sent.
+    #[error("password reset by mail is not set up; ask an admin")]
+    MailNotSetUp,
+    /// The mail server did not take a mail; the text is shown to the admin.
+    #[error("{0}")]
+    Mail(String),
+    /// Too many reset requests from one address; the number is the seconds to wait.
+    #[error("too many reset requests; try again in {0} seconds")]
+    TooManyResets(u64),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

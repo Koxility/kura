@@ -815,3 +815,351 @@ async fn pages_tell_the_browser_what_is_allowed() {
         "max-age=31536000"
     );
 }
+
+/// A mail server that takes every mail without asking for a password, over plain SMTP, and
+/// hands each one on as its raw text.
+async fn fake_mail_server() -> (u16, tokio::sync::mpsc::UnboundedReceiver<String>) {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (sent, received) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let sent = sent.clone();
+            tokio::spawn(async move {
+                let (read, mut write) = stream.into_split();
+                let mut lines = BufReader::new(read).lines();
+                write.write_all(b"220 fake ESMTP\r\n").await.unwrap();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let command = line.to_ascii_uppercase();
+                    let answer: &[u8] = if command.starts_with("EHLO") {
+                        b"250-fake\r\n250 8BITMIME\r\n"
+                    } else if command.starts_with("DATA") {
+                        write.write_all(b"354 go on\r\n").await.unwrap();
+                        let mut mail = String::new();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            if line == "." {
+                                break;
+                            }
+                            mail.push_str(&line);
+                            mail.push('\n');
+                        }
+                        let _ = sent.send(mail);
+                        b"250 queued\r\n"
+                    } else if command.starts_with("QUIT") {
+                        let _ = write.write_all(b"221 bye\r\n").await;
+                        break;
+                    } else {
+                        b"250 ok\r\n"
+                    };
+                    write.write_all(answer).await.unwrap();
+                }
+            });
+        }
+    });
+    (port, received)
+}
+
+/// The text of every part of a mail, with quoted-printable and base64 undone.
+fn readable(mail: &str) -> String {
+    use base64::Engine;
+    let mut out = mail.replace("=\n", "").replace("=3D", "=");
+    for block in mail.split("\n\n") {
+        let joined: String = block.lines().collect();
+        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(joined.trim()) {
+            out.push_str(&String::from_utf8_lossy(&bytes));
+        }
+    }
+    out
+}
+
+fn reset_token(mail: &str) -> String {
+    let text = readable(mail);
+    let start = text.find("reset-password#token=").expect("a reset link") + 21;
+    text[start..start + 64].to_owned()
+}
+
+async fn next_mail(mails: &mut tokio::sync::mpsc::UnboundedReceiver<String>) -> String {
+    tokio::time::timeout(std::time::Duration::from_secs(10), mails.recv())
+        .await
+        .expect("a mail within 10 seconds")
+        .unwrap()
+}
+
+fn plain_mail_server(port: u16) -> Value {
+    json!({
+        "host": "127.0.0.1", "port": port, "encryption": "none",
+        "from": "Kura <noreply@example.org>", "public_url": "https://kura.example.org/",
+    })
+}
+
+#[tokio::test]
+async fn only_admins_set_the_mail_server_and_its_password_stays_hidden() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let user = json!({ "name": "sam", "password": "correct horse", "role": "user" });
+    server.call(Method::POST, "/users", &admin, user).await;
+    let sam = server.log_in("/login", "sam", "correct horse").await;
+
+    assert_eq!(server.get("/admin/mail", &sam).await.0, 403);
+    let proton = json!({
+        "host": "smtp.protonmail.ch", "port": 587, "encryption": "starttls",
+        "username": "noreply@example.org", "password": "token-secret",
+        "from": "Kura <noreply@example.org>", "public_url": "https://kura.example.org",
+    });
+    assert_eq!(
+        server
+            .call(Method::PUT, "/admin/mail", &sam, proton.clone())
+            .await
+            .0,
+        403
+    );
+    let (code, saved) = server
+        .call(Method::PUT, "/admin/mail", &admin, proton.clone())
+        .await;
+    assert_eq!(code, 200);
+    assert_eq!(saved["password_set"], true);
+    assert!(saved.get("password").is_none());
+    let (_, shown) = server.get("/admin/mail", &admin).await;
+    assert!(!shown.to_string().contains("token-secret"));
+    assert_eq!(shown["enabled"], true);
+    // Neither the settings nor their export carry it.
+    let (_, settings) = server.get("/settings", &admin).await;
+    assert!(!settings.to_string().contains("token-secret"));
+
+    // An empty password keeps the stored one.
+    let mut again = proton.clone();
+    again["password"] = json!("");
+    let (_, kept) = server.call(Method::PUT, "/admin/mail", &admin, again).await;
+    assert_eq!(kept["password_set"], true);
+
+    for (field, value) in [
+        (
+            "from",
+            json!("Kura <noreply@example.org>\r\nBcc: someone@example.org"),
+        ),
+        ("from", json!("not an address")),
+        ("host", json!("https://smtp.example.org")),
+        ("public_url", json!("javascript:alert(1)")),
+        ("public_url", json!("https://kura.example.org/?next=evil")),
+        ("encryption", json!("none")),
+        ("port", json!(0)),
+    ] {
+        let mut bad = proton.clone();
+        bad[field] = value.clone();
+        let code = server.call(Method::PUT, "/admin/mail", &admin, bad).await.0;
+        assert_eq!(code, 400, "{field} = {value}");
+    }
+    // The status tells everyone whether "Forgot password?" works, nothing more.
+    let (_, status) = server.get("/status", "").await;
+    assert_eq!(status["password_reset"], true);
+    assert!(!status.to_string().contains("protonmail"));
+}
+
+#[tokio::test]
+async fn a_reset_link_works_once_and_tells_nobody_who_has_an_account() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let ask =
+        |name: &str| server.call(Method::POST, "/password-reset", "", json!({ "name": name }));
+
+    // Without a mail server the page says so plainly.
+    let (code, answer) = ask("admin").await;
+    assert_eq!(code, 503);
+    assert!(answer["error"].as_str().unwrap().contains("not set up"));
+
+    let (port, mut mails) = fake_mail_server().await;
+    let saved = server.call(Method::PUT, "/admin/mail", &admin, plain_mail_server(port));
+    assert_eq!(saved.await.0, 200);
+    let sam = json!({ "name": "sam", "password": "correct horse", "role": "user", "email": "sam@example.org" });
+    assert_eq!(
+        server.call(Method::POST, "/users", &admin, sam).await.0,
+        200
+    );
+    let lee = json!({ "name": "lee", "password": "correct horse", "role": "user" });
+    server.call(Method::POST, "/users", &admin, lee).await;
+    let session = server.log_in("/login", "sam", "correct horse").await;
+    let (_, key) = server
+        .call(
+            Method::POST,
+            "/account/keys",
+            &session,
+            json!({ "name": "Musubi" }),
+        )
+        .await;
+    let key = key["secret"].as_str().unwrap().to_owned();
+
+    // Same answer for an account with an email, one without, and none at all.
+    let answers = [ask("sam").await, ask("lee").await, ask("nobody").await];
+    assert!(
+        answers.iter().all(|answer| answer == &answers[0]),
+        "{answers:?}"
+    );
+    assert_eq!(answers[0].0, 202);
+
+    let mail = next_mail(&mut mails).await;
+    assert!(mail.contains("To: sam <sam@example.org>"), "{mail}");
+    assert!(mail.contains("From: Kura <noreply@example.org>"), "{mail}");
+    assert!(
+        mail.contains("Subject: Kura: reset your password"),
+        "{mail}"
+    );
+    let text = readable(&mail);
+    assert!(
+        text.contains("https://kura.example.org/reset-password#token="),
+        "{text}"
+    );
+    let token = reset_token(&mail);
+    assert!(token.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    // Only sam has an email: no other mail, and asking again at once sends nothing.
+    assert_eq!(ask("SAM@example.org").await.0, 202);
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(mails.try_recv().is_err(), "a second mail was sent");
+
+    let confirm = |token: &str, password: &str| {
+        let form = json!({ "token": token, "password": password });
+        server.call(Method::POST, "/password-reset/confirm", "", form)
+    };
+    // A password that is too short does not use the link up.
+    assert_eq!(confirm(&token, "short").await.0, 400);
+    assert_eq!(confirm(&"0".repeat(64), "a new password").await.0, 400);
+    assert_eq!(confirm("not hex", "a new password").await.0, 400);
+    assert_eq!(confirm(&token, "a new password").await.0, 204);
+    // Once only.
+    assert_eq!(confirm(&token, "another password").await.0, 400);
+
+    // Every session and key of the account ended; the new password works.
+    assert_eq!(server.get("/account", &session).await.0, 401);
+    let url = format!("{}/api/v1/account", server.base);
+    let by_key = server.http.get(url).bearer_auth(key).send().await.unwrap();
+    assert_eq!(by_key.status(), 401);
+    server.log_in("/login", "sam", "a new password").await;
+}
+
+#[tokio::test]
+async fn reset_requests_are_braked_per_address() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let (port, _mails) = fake_mail_server().await;
+    server
+        .call(Method::PUT, "/admin/mail", &admin, plain_mail_server(port))
+        .await;
+    let mut codes = Vec::new();
+    for name in 0..8 {
+        let form = json!({ "name": format!("someone{name}") });
+        codes.push(
+            server
+                .call(Method::POST, "/password-reset", "", form)
+                .await
+                .0,
+        );
+    }
+    assert_eq!(&codes[..5], &[202; 5]);
+    assert_eq!(codes[7], 429, "{codes:?}");
+}
+
+#[tokio::test]
+async fn admins_manage_emails_and_send_a_test_mail() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let user = json!({ "name": "sam", "password": "correct horse", "role": "user" });
+    let (_, sam) = server.call(Method::POST, "/users", &admin, user).await;
+    let id = sam["id"].as_i64().unwrap();
+    let sam_session = server.log_in("/login", "sam", "correct horse").await;
+    let path = format!("/users/{id}/email");
+
+    let email = json!({ "email": "sam@example.org" });
+    assert_eq!(
+        server
+            .call(Method::PUT, &path, &sam_session, email.clone())
+            .await
+            .0,
+        403
+    );
+    assert_eq!(server.call(Method::PUT, &path, &admin, email).await.0, 204);
+    let bad = json!({ "email": "sam@example.org\r\nBcc: x@example.org" });
+    assert_eq!(server.call(Method::PUT, &path, &admin, bad).await.0, 400);
+    assert_eq!(
+        server
+            .call(
+                Method::PUT,
+                "/users/999/email",
+                &admin,
+                json!({ "email": "" })
+            )
+            .await
+            .0,
+        404
+    );
+    let (_, users) = server.get("/users", &admin).await;
+    assert_eq!(users[1]["email"], "sam@example.org");
+    let bad_user =
+        json!({ "name": "kim", "password": "correct horse", "role": "user", "email": "nope" });
+    assert_eq!(
+        server
+            .call(Method::POST, "/users", &admin, bad_user)
+            .await
+            .0,
+        400
+    );
+    assert_eq!(
+        server
+            .get("/users", &admin)
+            .await
+            .1
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let to = json!({ "to": "admin@example.org" });
+    assert_eq!(
+        server
+            .call(Method::POST, "/admin/mail/test", &admin, to.clone())
+            .await
+            .0,
+        503
+    );
+    let (port, mut mails) = fake_mail_server().await;
+    server
+        .call(Method::PUT, "/admin/mail", &admin, plain_mail_server(port))
+        .await;
+    assert_eq!(
+        server
+            .call(Method::POST, "/admin/mail/test", &sam_session, to.clone())
+            .await
+            .0,
+        403
+    );
+    assert_eq!(
+        server
+            .call(Method::POST, "/admin/mail/test", &admin, to)
+            .await
+            .0,
+        204
+    );
+    let mail = next_mail(&mut mails).await;
+    assert!(mail.contains("Subject: Kura: test mail"), "{mail}");
+
+    // A mail server that is not there: a clear error, not a hang.
+    let gone = json!({ "host": "127.0.0.1", "port": 9, "encryption": "none",
+        "from": "noreply@example.org", "public_url": "http://kura.local" });
+    server.call(Method::PUT, "/admin/mail", &admin, gone).await;
+    let (code, answer) = server
+        .call(
+            Method::POST,
+            "/admin/mail/test",
+            &admin,
+            json!({ "to": "admin@example.org" }),
+        )
+        .await;
+    assert_eq!(code, 502);
+    assert!(
+        answer["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("the mail server"),
+        "{answer}"
+    );
+}

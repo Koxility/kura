@@ -9,8 +9,8 @@ use std::{
 };
 
 use kura_domain::{
-    Account, ApiKey, EpisodeId, Job, Language, Picked, Request, RequestState, Role, Settings,
-    Theme, User,
+    Account, ApiKey, EpisodeId, Job, Language, Mail, Picked, Request, RequestState, Role, Settings,
+    Theme, User, UserEntry,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params, types::Type};
 use rusqlite_migration::{M, Migrations};
@@ -102,6 +102,21 @@ CREATE TABLE api_keys (
 );
 ";
 
+/// Added in 1.4.0: the mail server for password resets, and the reset links that are out.
+/// Only the SHA-256 of a link's token is kept.
+const MAIL_AND_RESETS: &str = "
+CREATE TABLE mail (
+    id   INTEGER PRIMARY KEY CHECK (id = 1),
+    json TEXT NOT NULL
+);
+CREATE TABLE password_resets (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+";
+
 const JOB_COLUMNS: &str = "id, site, slug, season, episode, series_title, state, progress, error, path, \
      language, hoster, dir, hidden, queued_at, imdb_id, started_at";
 
@@ -163,6 +178,7 @@ impl Store {
             M::up(REQUESTS_AND_IMDB),
             M::up(STARTED_AT),
             M::up(ACCOUNTS),
+            M::up(MAIL_AND_RESETS),
         ])
         .to_latest(&mut conn)?;
         Ok(Self {
@@ -273,10 +289,101 @@ impl Store {
         Ok(changed > 0)
     }
 
+    /// Also ends the reset links that are out: they went to the old address.
     pub fn set_email(&self, id: i64, email: Option<&str>) -> Result<()> {
-        self.conn().execute(
+        let conn = self.conn();
+        conn.execute(
             "UPDATE users SET email = ?2 WHERE id = ?1",
             params![id, email],
+        )?;
+        conn.execute("DELETE FROM password_resets WHERE user_id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Every user with their email, for admins.
+    pub fn user_entries(&self) -> Result<Vec<UserEntry>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT id, name, role, email FROM users ORDER BY id")?;
+        let users = stmt
+            .query_map([], user_entry)?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(users)
+    }
+
+    /// The users a reset was asked for: by name, or by email (both case-insensitive).
+    pub fn users_named(&self, name_or_email: &str) -> Result<Vec<UserEntry>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, role, email FROM users
+             WHERE name = ?1 OR (email IS NOT NULL AND lower(email) = lower(?1)) ORDER BY id",
+        )?;
+        let users = stmt
+            .query_map([name_or_email], user_entry)?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(users)
+    }
+
+    // Password resets. Times are Unix seconds; the caller hashes the token.
+
+    /// Stores a new reset link for a user; one sent before stops working.
+    pub fn create_reset(&self, token_hash: &str, user_id: i64, now: i64, ttl: i64) -> Result<()> {
+        let conn = self.conn();
+        conn.execute(
+            "DELETE FROM password_resets WHERE user_id = ?1 OR expires_at <= ?2",
+            params![user_id, now],
+        )?;
+        conn.execute(
+            "INSERT INTO password_resets (token_hash, user_id, expires_at, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![token_hash, user_id, now + ttl, now],
+        )?;
+        Ok(())
+    }
+
+    /// When the user's newest reset link was made, if one is still out.
+    pub fn last_reset(&self, user_id: i64, now: i64) -> Result<Option<i64>> {
+        Ok(self.conn().query_row(
+            "SELECT max(created_at) FROM password_resets WHERE user_id = ?1 AND expires_at > ?2",
+            params![user_id, now],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Uses up a reset link: returns its user and deletes it in one step, so a link works once
+    /// even when it is sent twice at the same moment. `None` for an unknown or expired link.
+    pub fn take_reset(&self, token_hash: &str, now: i64) -> Result<Option<i64>> {
+        let conn = self.conn();
+        let user = conn
+            .query_row(
+                "DELETE FROM password_resets WHERE token_hash = ?1 AND expires_at > ?2
+                 RETURNING user_id",
+                params![token_hash, now],
+                |row| row.get(0),
+            )
+            .optional()?;
+        conn.execute("DELETE FROM password_resets WHERE expires_at <= ?1", [now])?;
+        Ok(user)
+    }
+
+    // Mail
+
+    /// The mail server settings; empty while none were saved.
+    pub fn mail(&self) -> Result<Mail> {
+        let json: Option<String> = self
+            .conn()
+            .query_row("SELECT json FROM mail WHERE id = 1", [], |row| row.get(0))
+            .optional()?;
+        Ok(match json {
+            Some(json) => serde_json::from_str(&json)?,
+            None => Mail::default(),
+        })
+    }
+
+    pub fn save_mail(&self, mail: &Mail) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO mail (id, json) VALUES (1, ?1)
+             ON CONFLICT (id) DO UPDATE SET json = excluded.json",
+            [serde_json::to_string(mail)?],
         )?;
         Ok(())
     }
@@ -372,7 +479,8 @@ impl Store {
     }
 
     /// Replaces a user's password hash, ends their other sessions and deletes their API
-    /// keys, so a changed password also locks out every other device and program.
+    /// keys and reset links, so a changed password also locks out every other device and
+    /// program.
     pub fn set_password(
         &self,
         user_id: i64,
@@ -389,6 +497,7 @@ impl Store {
             params![user_id, keep_session],
         )?;
         conn.execute("DELETE FROM api_keys WHERE user_id = ?1", [user_id])?;
+        conn.execute("DELETE FROM password_resets WHERE user_id = ?1", [user_id])?;
         Ok(())
     }
 
@@ -692,6 +801,15 @@ fn user(row: &Row) -> rusqlite::Result<User> {
         id: row.get(0)?,
         name: row.get(1)?,
         role: text(row, 2)?,
+    })
+}
+
+fn user_entry(row: &Row) -> rusqlite::Result<UserEntry> {
+    Ok(UserEntry {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        role: text(row, 2)?,
+        email: row.get(3)?,
     })
 }
 
@@ -1198,5 +1316,84 @@ mod tests {
         store.requeue_interrupted().unwrap();
         let job = store.claim_next().unwrap().unwrap();
         assert_eq!((job.id, job.progress), (id, 0.0));
+    }
+
+    #[test]
+    fn a_reset_link_works_once_and_until_it_expires() {
+        let (store, admin) = store_with_admin();
+        store.create_reset("one", admin.id, 100, 60).unwrap();
+        assert_eq!(store.last_reset(admin.id, 100).unwrap(), Some(100));
+        // Expired at 160.
+        assert_eq!(store.take_reset("one", 160).unwrap(), None);
+        assert_eq!(store.last_reset(admin.id, 160).unwrap(), None);
+
+        store.create_reset("two", admin.id, 200, 60).unwrap();
+        assert_eq!(store.take_reset("two", 259).unwrap(), Some(admin.id));
+        assert_eq!(store.take_reset("two", 259).unwrap(), None);
+
+        // A newer link replaces an older one.
+        store.create_reset("old", admin.id, 300, 60).unwrap();
+        store.create_reset("new", admin.id, 301, 60).unwrap();
+        assert_eq!(store.take_reset("old", 302).unwrap(), None);
+        assert_eq!(store.take_reset("new", 302).unwrap(), Some(admin.id));
+    }
+
+    #[test]
+    fn a_new_password_or_email_ends_the_reset_links() {
+        let (store, admin) = store_with_admin();
+        store.create_reset("one", admin.id, 100, 60).unwrap();
+        store.set_password(admin.id, "new-hash", "").unwrap();
+        assert_eq!(store.take_reset("one", 101).unwrap(), None);
+
+        store.create_reset("two", admin.id, 100, 60).unwrap();
+        store
+            .set_email(admin.id, Some("admin@example.org"))
+            .unwrap();
+        assert_eq!(store.take_reset("two", 101).unwrap(), None);
+
+        // Deleting the user deletes their links.
+        let sam = store
+            .create_user("sam", "hash", Role::User)
+            .unwrap()
+            .unwrap();
+        store.create_reset("three", sam.id, 100, 60).unwrap();
+        assert!(store.delete_user(sam.id).unwrap());
+        assert_eq!(store.take_reset("three", 101).unwrap(), None);
+    }
+
+    #[test]
+    fn resets_find_users_by_name_or_email() {
+        let (store, admin) = store_with_admin();
+        store
+            .set_email(admin.id, Some("Admin@Example.org"))
+            .unwrap();
+        let found = |text| {
+            store
+                .users_named(text)
+                .unwrap()
+                .into_iter()
+                .map(|user| user.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(found("ADMIN"), vec![admin.id]);
+        assert_eq!(found("admin@example.ORG"), vec![admin.id]);
+        assert!(found("nobody").is_empty());
+        assert!(found("%").is_empty());
+    }
+
+    #[test]
+    fn the_mail_settings_are_kept_apart_from_the_settings() {
+        let store = Store::open_in_memory().unwrap();
+        assert_eq!(store.mail().unwrap(), Mail::default());
+        let mail = Mail {
+            host: "smtp.example.org".into(),
+            port: 587,
+            password: "secret".into(),
+            ..Mail::default()
+        };
+        store.save_mail(&mail).unwrap();
+        assert_eq!(store.mail().unwrap(), mail);
+        let settings = serde_json::to_string(&store.settings().unwrap()).unwrap();
+        assert!(!settings.contains("secret"));
     }
 }

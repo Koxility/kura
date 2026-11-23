@@ -65,6 +65,8 @@ fn router(core: Arc<Core>) -> Router {
         .route("/setup", post(setup))
         .route("/login", post(login))
         .route("/logout", post(logout))
+        .route("/password-reset", post(request_reset))
+        .route("/password-reset/confirm", post(confirm_reset))
         .route("/account", get(account))
         .route("/account/password", put(change_password))
         .route("/account/name", put(rename))
@@ -110,8 +112,11 @@ fn router(core: Arc<Core>) -> Router {
         .route("/library/{root}", get(browse))
         .route("/admin/ip", get(public_ip))
         .route("/admin/jellyfin/test", post(test_jellyfin))
+        .route("/admin/mail", get(mail_settings).put(save_mail))
+        .route("/admin/mail/test", post(test_mail))
         .route("/users", get(users).post(create_user))
         .route("/users/{id}", delete(delete_user))
+        .route("/users/{id}/email", put(set_user_email))
         .fallback(|| async { ApiError(StatusCode::NOT_FOUND, "no such endpoint".into()) })
         // Answers change with every download; neither the browser nor a proxy may keep one.
         .layer(SetResponseHeaderLayer::if_not_present(
@@ -184,7 +189,11 @@ impl From<CoreError> for ApiError {
             CoreError::UnknownSite | CoreError::SiteDisabled | CoreError::UnknownJob => {
                 StatusCode::NOT_FOUND
             }
-            CoreError::TooManyLogins(_) => StatusCode::TOO_MANY_REQUESTS,
+            CoreError::TooManyLogins(_) | CoreError::TooManyResets(_) => {
+                StatusCode::TOO_MANY_REQUESTS
+            }
+            CoreError::MailNotSetUp => StatusCode::SERVICE_UNAVAILABLE,
+            CoreError::Mail(_) => StatusCode::BAD_GATEWAY,
             CoreError::Jellyfin(_) => StatusCode::BAD_GATEWAY,
             // The site did not answer or changed its pages.
             CoreError::Site(_) => StatusCode::BAD_GATEWAY,
@@ -355,6 +364,8 @@ async fn status(State(core): App, headers: HeaderMap) -> ApiResult<Json<Value>> 
         "repository": format!("https://github.com/{REPOSITORY}"),
         "latest_version": if known { core.newer_release() } else { None },
         "needs_library": core.settings()?.libraries.is_empty(),
+        // Whether the login page offers "Forgot password?".
+        "password_reset": core.password_reset_enabled()?,
         "sites": core.enabled_sites()?,
         // What a title's page shows as chosen before anyone picks; library names stay with
         // admins.
@@ -421,6 +432,45 @@ async fn login(
     };
     let cookie = session_cookie(&token, SESSION_TTL, client.https);
     Ok((cookie, Json(user)).into_response())
+}
+
+#[derive(Deserialize)]
+struct ResetRequest {
+    /// A name or an email address.
+    name: String,
+}
+
+/// Asks for a reset link. The answer is the same whether or not the account exists, has an
+/// email address or just got a link; only a missing mail server and the brake show.
+async fn request_reset(
+    State(core): App,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    Extension(proxies): Proxies,
+    headers: HeaderMap,
+    Json(form): Json<ResetRequest>,
+) -> ApiResult<Response> {
+    let client = proxies.client(from.ip(), &headers);
+    core.request_password_reset(&form.name, client.address)?;
+    let message = "If an account with an email address matches, a link to choose a new password \
+                   is on its way. It works for 30 minutes.";
+    Ok((StatusCode::ACCEPTED, Json(json!({ "message": message }))).into_response())
+}
+
+#[derive(Deserialize)]
+struct ResetConfirm {
+    token: String,
+    password: String,
+}
+
+async fn confirm_reset(State(core): App, Json(form): Json<ResetConfirm>) -> ApiResult<StatusCode> {
+    if core.reset_password(&form.token, &form.password).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(error(
+            StatusCode::BAD_REQUEST,
+            "this link has expired or was already used; ask for a new one",
+        ))
+    }
 }
 
 #[derive(Deserialize)]
@@ -596,10 +646,13 @@ struct NewUser {
     name: String,
     password: String,
     role: Role,
+    /// For password resets; optional.
+    #[serde(default)]
+    email: String,
 }
 
-async fn users(State(core): App, _: Admin) -> ApiResult<Json<Vec<User>>> {
-    Ok(Json(core.users()?))
+async fn users(State(core): App, _: Admin) -> ApiResult<Json<Vec<kura_domain::UserEntry>>> {
+    Ok(Json(core.user_entries()?))
 }
 
 async fn create_user(
@@ -607,9 +660,77 @@ async fn create_user(
     _: Admin,
     Json(new): Json<NewUser>,
 ) -> ApiResult<Json<User>> {
+    // Checked before the account exists, so a typo does not leave a half-made user.
+    if !new.email.trim().is_empty() {
+        kura_core::check_email(&new.email)?;
+    }
     let created = core.create_user(&new.name, &new.password, new.role).await?;
     let taken = || error(StatusCode::CONFLICT, "this name is taken");
-    Ok(Json(created.ok_or_else(taken)?))
+    let created = created.ok_or_else(taken)?;
+    if !new.email.trim().is_empty() {
+        core.set_user_email(created.id, &new.email)?;
+    }
+    Ok(Json(created))
+}
+
+#[derive(Deserialize)]
+struct EmailForm {
+    #[serde(default)]
+    email: String,
+}
+
+async fn set_user_email(
+    State(core): App,
+    _: Admin,
+    Path(id): Path<i64>,
+    Json(form): Json<EmailForm>,
+) -> ApiResult<StatusCode> {
+    if core.set_user_email(id, &form.email)? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(error(StatusCode::NOT_FOUND, "no such user"))
+    }
+}
+
+/// The mail settings as the browser sees them: everything but the password.
+fn mail_view(mail: &kura_domain::Mail) -> Value {
+    json!({
+        "host": mail.host,
+        "port": mail.port,
+        "encryption": mail.encryption,
+        "username": mail.username,
+        "password_set": !mail.password.is_empty(),
+        "from": mail.from,
+        "public_url": mail.public_url,
+        "enabled": mail.enabled(),
+    })
+}
+
+async fn mail_settings(State(core): App, _: Admin) -> ApiResult<Json<Value>> {
+    Ok(Json(mail_view(&core.mail()?)))
+}
+
+/// An empty `password` keeps the stored one.
+async fn save_mail(
+    State(core): App,
+    _: Admin,
+    Json(mail): Json<kura_domain::Mail>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(mail_view(&core.save_mail(&mail)?)))
+}
+
+#[derive(Deserialize)]
+struct TestMail {
+    to: String,
+}
+
+async fn test_mail(
+    State(core): App,
+    _: Admin,
+    Json(form): Json<TestMail>,
+) -> ApiResult<StatusCode> {
+    core.send_test_mail(&form.to).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn delete_user(State(core): App, _: Admin, Path(id): Path<i64>) -> ApiResult<StatusCode> {
