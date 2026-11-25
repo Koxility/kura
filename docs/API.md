@@ -11,7 +11,7 @@ The web app and other programs, such as [Musubi](https://github.com/Koxility/mus
   Authorization: Bearer kura_…
   ```
 
-A key has the rights of the account it belongs to: an admin's key can queue downloads, a user's key can send requests. It cannot change the password, the email or create or delete keys; those need a login with the password. Deleting the key, changing the account's password, or deleting the account ends its access at once. A request with an unknown key is answered `401`.
+A key has the rights of the account it belongs to: an admin's key can queue downloads, a user's key can send requests. It cannot change the password, the email or create or delete keys; those need a login with the password. An admin's key also cannot create or delete accounts, set another account's email or password, send or revoke invites, change the mail server or send a test mail, or save the settings (`PUT /settings`): whoever controls those controls Kura, so they need a login with the password too and answer `403` to a key. Deleting the key, changing the account's password, or deleting the account ends its access at once. A request with an unknown key is answered `401`.
 
 A change (any method but `GET`, `HEAD`, `OPTIONS`) that comes with the session cookie from a page on another website is refused with `403`, also from a neighbouring subdomain. Kura goes by the browser's `Sec-Fetch-Site`, or else compares `Origin` with the address it was asked under (`X-Forwarded-Host`, else `Host`). Programs that send neither header, and every request with an API key, are not affected.
 

@@ -310,7 +310,7 @@ fn in_browser(session: &Session) -> ApiResult<&str> {
     session.token.as_deref().ok_or_else(|| {
         error(
             StatusCode::FORBIDDEN,
-            "log in with your password to change the password, the email or API keys",
+            "log in with your password for this; an API key cannot change passwords, emails, keys, accounts or the server settings",
         )
     })
 }
@@ -327,6 +327,24 @@ impl FromRequestParts<Arc<Core>> for Admin {
             Role::Admin => Ok(Self(user)),
             Role::User => Err(error(StatusCode::FORBIDDEN, "only an admin can do this")),
         }
+    }
+}
+
+/// A logged-in admin with a password login, not an API key: for what decides who controls
+/// Kura (accounts, invites, the mail server, the settings), so a key that got out cannot make
+/// itself an admin login or send reset links elsewhere.
+struct BrowserAdmin(User);
+
+impl FromRequestParts<Arc<Core>> for BrowserAdmin {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, core: &Arc<Core>) -> ApiResult<Self> {
+        let session = Session::from_request_parts(parts, core).await?;
+        if session.user.role != Role::Admin {
+            return Err(error(StatusCode::FORBIDDEN, "only an admin can do this"));
+        }
+        in_browser(&session)?;
+        Ok(Self(session.user))
     }
 }
 
@@ -760,7 +778,7 @@ async fn users(State(core): App, _: Admin) -> ApiResult<Json<Vec<kura_domain::Us
 
 async fn create_user(
     State(core): App,
-    _: Admin,
+    _: BrowserAdmin,
     Json(new): Json<NewUser>,
 ) -> ApiResult<Json<User>> {
     // Checked before the account exists, so a typo does not leave a half-made user.
@@ -785,14 +803,10 @@ struct EmailForm {
 /// Logged in with a password, not an API key: the email decides where reset links go.
 async fn set_user_email(
     State(core): App,
-    session: Session,
+    _: BrowserAdmin,
     Path(id): Path<i64>,
     Json(form): Json<EmailForm>,
 ) -> ApiResult<StatusCode> {
-    if session.user.role != Role::Admin {
-        return Err(error(StatusCode::FORBIDDEN, "only an admin can do this"));
-    }
-    in_browser(&session)?;
     if core.set_user_email(id, &form.email)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -808,14 +822,10 @@ struct PasswordForm {
 /// An admin sets someone's password, logged in with their own password, not by API key.
 async fn set_user_password(
     State(core): App,
-    session: Session,
+    _: BrowserAdmin,
     Path(id): Path<i64>,
     Json(form): Json<PasswordForm>,
 ) -> ApiResult<StatusCode> {
-    if session.user.role != Role::Admin {
-        return Err(error(StatusCode::FORBIDDEN, "only an admin can do this"));
-    }
-    in_browser(&session)?;
     if core.set_user_password(id, &form.password).await? {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -836,7 +846,7 @@ fn user_role() -> Role {
 
 async fn invite(
     State(core): App,
-    Admin(admin): Admin,
+    BrowserAdmin(admin): BrowserAdmin,
     Json(form): Json<InviteForm>,
 ) -> ApiResult<Json<kura_domain::Invite>> {
     Ok(Json(core.invite(&form.email, form.role, &admin).await?))
@@ -846,7 +856,11 @@ async fn invites(State(core): App, _: Admin) -> ApiResult<Json<Vec<kura_domain::
     Ok(Json(core.invites()?))
 }
 
-async fn revoke_invite(State(core): App, _: Admin, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+async fn revoke_invite(
+    State(core): App,
+    _: BrowserAdmin,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
     if core.revoke_invite(id)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -875,7 +889,7 @@ async fn mail_settings(State(core): App, _: Admin) -> ApiResult<Json<Value>> {
 /// An empty `password` keeps the stored one.
 async fn save_mail(
     State(core): App,
-    _: Admin,
+    _: BrowserAdmin,
     Json(mail): Json<kura_domain::Mail>,
 ) -> ApiResult<Json<Value>> {
     Ok(Json(mail_view(&core.save_mail(&mail)?)))
@@ -888,14 +902,18 @@ struct TestMail {
 
 async fn test_mail(
     State(core): App,
-    _: Admin,
+    _: BrowserAdmin,
     Json(form): Json<TestMail>,
 ) -> ApiResult<StatusCode> {
     core.send_test_mail(&form.to).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn delete_user(State(core): App, _: Admin, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+async fn delete_user(
+    State(core): App,
+    _: BrowserAdmin,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
     if core.delete_user(id)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -1210,7 +1228,7 @@ async fn settings(State(core): App, _: Admin) -> ApiResult<Json<Value>> {
 
 async fn save_settings(
     State(core): App,
-    _: Admin,
+    _: BrowserAdmin,
     Json(settings): Json<Settings>,
 ) -> ApiResult<Json<Settings>> {
     core.save_settings(&settings)?;

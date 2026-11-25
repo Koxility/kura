@@ -4,6 +4,10 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Security
+
+- **An admin's API key can no longer take over Kura.** Creating or deleting accounts, sending or revoking invites, changing the mail server (and its test mail) and saving the settings now need a login with the password, like setting someone's password already did. Before, a key that got out could create a second admin, log in as it and lock the owner out, or point every reset link at another website. Programs keep everything else: queue, requests, browsing and reading.
+
 ## [1.5.1] - 2026-11-23
 
 ### Changed

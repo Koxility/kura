@@ -1525,3 +1525,62 @@ async fn nobody_signs_up_without_an_admin() {
     );
     assert_eq!(users().await, 1);
 }
+
+/// Audit finding: an admin's API key could create an admin with a password, log in as it and
+/// lock the owner out, or send reset links to another address. Everything that decides who
+/// controls Kura now needs a login with a password.
+#[tokio::test]
+async fn an_admin_key_cannot_take_over_kura() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let (port, _mails) = fake_mail_server().await;
+    server
+        .call(Method::PUT, "/admin/mail", &admin, plain_mail_server(port))
+        .await;
+    let (_, created) = server
+        .call(
+            Method::POST,
+            "/account/keys",
+            &admin,
+            json!({ "name": "Musubi" }),
+        )
+        .await;
+    let secret = created["secret"].as_str().unwrap().to_owned();
+    let with_key = |method: Method, path: &str, body: Value| {
+        let url = format!("{}/api/v1{path}", server.base);
+        let request = server.http.request(method, url).bearer_auth(secret.clone());
+        async move {
+            let request = if body.is_null() {
+                request
+            } else {
+                request.json(&body)
+            };
+            request.send().await.unwrap().status().as_u16()
+        }
+    };
+
+    let backdoor = json!({ "name": "backdoor", "password": "backdoor pw 1", "role": "admin" });
+    assert_eq!(with_key(Method::POST, "/users", backdoor).await, 403);
+    assert_eq!(with_key(Method::DELETE, "/users/1", Value::Null).await, 403);
+    let mut elsewhere = plain_mail_server(port);
+    elsewhere["public_url"] = json!("https://evil.example");
+    assert_eq!(with_key(Method::PUT, "/admin/mail", elsewhere).await, 403);
+    let to = json!({ "to": "admin@example.org" });
+    assert_eq!(with_key(Method::POST, "/admin/mail/test", to).await, 403);
+    let invite = json!({ "email": "attacker@example.net", "role": "admin" });
+    assert_eq!(with_key(Method::POST, "/users/invite", invite).await, 403);
+    assert_eq!(
+        with_key(Method::DELETE, "/invites/1", Value::Null).await,
+        403
+    );
+    let (_, settings) = server.get("/settings", &admin).await;
+    assert_eq!(with_key(Method::PUT, "/settings", settings).await, 403);
+
+    // Nothing changed, and the key still does what a program needs.
+    let (_, users) = server.get("/users", &admin).await;
+    assert_eq!(users.as_array().unwrap().len(), 1);
+    let (_, mail) = server.get("/admin/mail", &admin).await;
+    assert_ne!(mail["public_url"], "https://evil.example");
+    assert_eq!(with_key(Method::GET, "/queue", Value::Null).await, 200);
+    assert_eq!(with_key(Method::GET, "/users", Value::Null).await, 200);
+}
