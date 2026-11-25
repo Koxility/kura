@@ -197,9 +197,9 @@ impl From<CoreError> for ApiError {
             CoreError::UnknownSite | CoreError::SiteDisabled | CoreError::UnknownJob => {
                 StatusCode::NOT_FOUND
             }
-            CoreError::TooManyLogins(_) | CoreError::TooManyResets(_) => {
-                StatusCode::TOO_MANY_REQUESTS
-            }
+            CoreError::TooManyLogins(_)
+            | CoreError::TooManyResets(_)
+            | CoreError::TooManyTries(_) => StatusCode::TOO_MANY_REQUESTS,
             CoreError::MailNotSetUp => StatusCode::SERVICE_UNAVAILABLE,
             CoreError::Conflict(_) => StatusCode::CONFLICT,
             CoreError::Mail(_) => StatusCode::BAD_GATEWAY,
@@ -618,10 +618,14 @@ struct NewName {
 
 async fn rename(
     State(core): App,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    Extension(proxies): Proxies,
+    headers: HeaderMap,
     session: Session,
     Json(form): Json<NewName>,
 ) -> ApiResult<Json<Account>> {
-    if !core.rename(&session.user, &form.name)? {
+    let client = proxies.client(from.ip(), &headers);
+    if !core.rename(&session.user, &form.name, client.address)? {
         return Err(error(StatusCode::CONFLICT, "this name is taken"));
     }
     Ok(Json(core.account(&session.user)?))

@@ -202,10 +202,22 @@ impl Core {
         Ok(account)
     }
 
-    /// Returns `false` when another user has the name.
-    pub fn rename(&self, user: &User, name: &str) -> Result<bool> {
+    /// Returns `false` when another user has the name. Braked per account and address like
+    /// logins, since the answer tells whether a name is taken: names cannot be listed at speed.
+    pub fn rename(&self, user: &User, name: &str, from: IpAddr) -> Result<bool> {
         let name = check_name(name)?;
+        self.count_other_try(from, format!("{RENAME_BRAKE}{}", user.id))?;
         Ok(self.store.rename_user(user.id, name)?)
+    }
+
+    /// Counts a try at something braked like logins but not a login, in the login brake's
+    /// list, which cannot be filled cheaply: every entry there costs hashing a password.
+    pub(crate) fn count_other_try(&self, from: IpAddr, key: String) -> Result<()> {
+        self.count_try(&(network(from), key))
+            .map_err(|err| match err {
+                CoreError::TooManyLogins(seconds) => CoreError::TooManyTries(seconds),
+                other => other,
+            })
     }
 
     /// An admin sets the email of any user, at once and without a confirmation mail: the
@@ -342,6 +354,9 @@ fn count_in(tries: &mut LoginTries, key: &(IpAddr, String)) -> Result<()> {
 /// Every account has its own email address, and an invited address is kept for its invite.
 pub(crate) const EMAIL_TAKEN: CoreError =
     CoreError::Conflict("another account already uses this email address, or was invited with it");
+
+/// Start of the brake's key for renaming: per account, next to the login brake's names.
+const RENAME_BRAKE: &str = "\0rename:";
 
 /// More scenes than anyone keeps; bounds what one account stores.
 const MOST_ASCII_PIECES: usize = 100;

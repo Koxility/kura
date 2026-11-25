@@ -1875,3 +1875,37 @@ async fn every_email_belongs_to_one_account_in_any_case() {
     let (_, account) = server.get("/account", &lee).await;
     assert_eq!(account["email"], "lee@example.org");
 }
+
+/// Audit finding: renaming answers whether a name is taken, so any account could list every
+/// name at speed. A rename is now braked like a login, per account.
+#[tokio::test]
+async fn names_cannot_be_probed_at_speed() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    for name in ["sam", "lee"] {
+        let user = json!({ "name": name, "password": "correct horse", "role": "user" });
+        server.call(Method::POST, "/users", &admin, user).await;
+    }
+    let sam = server.log_in("/login", "sam", "correct horse").await;
+    let mut codes = Vec::new();
+    for name in ["admin", "lee", "kim", "max", "sam", "ann"] {
+        let form = json!({ "name": name });
+        codes.push(
+            server
+                .call(Method::PUT, "/account/name", &sam, form)
+                .await
+                .0,
+        );
+    }
+    assert_eq!(codes, [409, 409, 200, 200, 200, 429], "{codes:?}");
+    // Another account is not held up.
+    let lee = server.log_in("/login", "lee", "correct horse").await;
+    let form = json!({ "name": "lena" });
+    assert_eq!(
+        server
+            .call(Method::PUT, "/account/name", &lee, form)
+            .await
+            .0,
+        200
+    );
+}

@@ -12,6 +12,7 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 - **The Jellyfin API key is no longer shown**, like the mail password: the settings, also the exported configuration, only say that one is saved. An empty field keeps it, but only for the same Jellyfin address.
 - **The mail and Jellyfin tests no longer pass on what the server wrote.** They say in fixed words what went wrong (could not connect, not a mail server, refused with code 550, …), and Kura's log has the whole answer. Before, the test mail read out the greeting of whatever service ran at the address entered, which mapped the network Kura is in.
 - **A new email address counts once its link is opened, and every address belongs to one account.** Changing the own email mails a link to the new address (it works once and for 24 hours, under *Settings → Account* the address shows as waiting); reset links go there only after it is opened. An address another account or an open invite has is refused, whatever the case of its letters (also for addresses with letters beyond A to Z), when an admin creates a user or sets an email, and when an invite is redeemed. Before, any account could enter any address, also someone else's. Addresses an admin sets count at once, and addresses saved before stay as they are.
+- **Names cannot be probed at speed.** Changing the own name tells whether a name is taken, so it is now braked like a login: five changes, then a pause (30 seconds, doubling up to 15 minutes), per account.
 
 ## [1.5.1] - 2026-11-23
 

@@ -88,6 +88,10 @@ pub enum CoreError {
     /// Too many reset requests from one address; the number is the seconds to wait.
     #[error("too many reset requests; try again in {0} seconds")]
     TooManyResets(u64),
+    /// Too many tries at something else that is braked (renaming, the setup code); the number
+    /// is the seconds to wait.
+    #[error("too many tries; try again in {0} seconds")]
+    TooManyTries(u64),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
