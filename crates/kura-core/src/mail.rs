@@ -423,7 +423,10 @@ fn escape(text: &str) -> String {
 
 pub(crate) fn transport(mail: &Mail) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
     type Smtp = AsyncSmtpTransport<Tokio1Executor>;
-    let failed = |err: lettre::transport::smtp::Error| CoreError::Mail(describe(&err));
+    let failed = |err: lettre::transport::smtp::Error| {
+        tracing::warn!("the mail server's name: {err}");
+        CoreError::Mail("the mail server's name cannot be used for an encrypted connection".into())
+    };
     let builder = match mail.encryption {
         MailEncryption::Starttls => Smtp::starttls_relay(&mail.host).map_err(failed)?,
         MailEncryption::Tls => Smtp::relay(&mail.host).map_err(failed)?,
@@ -437,21 +440,34 @@ pub(crate) fn transport(mail: &Mail) -> Result<AsyncSmtpTransport<Tokio1Executor
     Ok(builder.build())
 }
 
-/// The mail server's complaint in words an admin can act on; never the password.
+/// The mail server's complaint in words an admin can act on. Only fixed texts and the
+/// server's three-digit code reach the browser, never what the server wrote: otherwise the
+/// test mail would read out the greeting of whatever service runs at an address, and so map
+/// the network Kura is in. The whole answer goes to the log, for whoever runs the server.
 pub(crate) fn describe(err: &lettre::transport::smtp::Error) -> String {
-    let detail = err.to_string();
-    if err.is_permanent() && detail.contains("535") {
-        return "the mail server refused the user name or password".into();
-    }
+    tracing::warn!("the mail server: {err}");
     if err.is_timeout() {
         return "the mail server did not answer in time".into();
     }
-    // lettre repeats its prefix for nested errors.
-    let detail = detail.replace("Connection error: Connection error: ", "Connection error: ");
-    if err.is_tls() || detail.contains("certificate") {
-        return format!("the encrypted connection to the mail server failed: {detail}");
+    if err.is_tls() || err.to_string().contains("certificate") {
+        return "the encrypted connection to the mail server failed; check the encryption \
+                setting and the server's certificate (details in Kura's log)"
+            .into();
     }
-    format!("the mail server answered: {detail}")
+    if let Some(code) = err.status() {
+        let code = code.to_string();
+        if code == "535" {
+            return "the mail server refused the user name or password".into();
+        }
+        if err.is_transient() {
+            return format!("the mail server refused for now (code {code}); try again later");
+        }
+        return format!("the mail server refused (code {code}); details in Kura's log");
+    }
+    if err.is_response() || err.is_client() {
+        return "the server at this address did not answer like a mail server".into();
+    }
+    "could not connect to the mail server; check the address and the port".into()
 }
 
 #[cfg(test)]

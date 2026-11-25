@@ -205,11 +205,15 @@ fn authorization(jellyfin: &Jellyfin) -> String {
     )
 }
 
+/// What went wrong, in fixed words: what a server at the address wrote is not passed on, so
+/// the test cannot read out other services in Kura's network. The whole error goes to the log.
 fn failed(err: reqwest::Error) -> CoreError {
+    tracing::warn!("Jellyfin: {err}");
     let text = match err.status() {
         Some(status) if status.as_u16() == 401 => "Jellyfin refused the API key".to_owned(),
         Some(status) => format!("Jellyfin answered {status}"),
-        None => format!("Jellyfin did not answer: {err}"),
+        None if err.is_timeout() => "Jellyfin did not answer in time".to_owned(),
+        None => "could not reach Jellyfin; check the address (details in Kura's log)".to_owned(),
     };
     CoreError::Jellyfin(text)
 }

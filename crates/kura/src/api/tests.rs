@@ -1184,7 +1184,7 @@ async fn admins_manage_emails_and_send_a_test_mail() {
         answer["error"]
             .as_str()
             .unwrap()
-            .starts_with("the mail server"),
+            .contains("connect to the mail server"),
         "{answer}"
     );
 }
@@ -1674,4 +1674,40 @@ async fn the_jellyfin_key_is_kept_but_never_shown() {
     moved["jellyfin"]["url"] = json!(elsewhere);
     let (code, _) = server.call(Method::PUT, "/settings", &admin, moved).await;
     assert_eq!(code, 400);
+}
+
+/// Audit finding: the mail test and the Jellyfin test passed on what any service at the
+/// address wrote, so an admin (or an admin's key) could read out services in Kura's network.
+#[tokio::test]
+async fn connection_tests_do_not_read_out_other_services() {
+    use tokio::io::AsyncWriteExt;
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let _ = stream
+                .write_all(b"SSH-2.0-OpenSSH_9.6 secret-banner\r\n")
+                .await;
+        }
+    });
+    let saved = server.call(Method::PUT, "/admin/mail", &admin, plain_mail_server(port));
+    assert_eq!(saved.await.0, 200);
+    let to = json!({ "to": "admin@example.org" });
+    let (code, answer) = server
+        .call(Method::POST, "/admin/mail/test", &admin, to)
+        .await;
+    assert_eq!(code, 502);
+    let text = answer["error"].as_str().unwrap();
+    assert!(!text.contains("secret") && !text.contains("SSH"), "{text}");
+    assert!(text.contains("did not answer like a mail server"), "{text}");
+
+    let jellyfin = json!({ "url": format!("http://127.0.0.1:{port}"), "api_key": "x" });
+    let (code, answer) = server
+        .call(Method::POST, "/admin/jellyfin/test", &admin, jellyfin)
+        .await;
+    assert_eq!(code, 502);
+    let text = answer["error"].as_str().unwrap();
+    assert!(!text.contains("secret") && !text.contains("SSH"), "{text}");
 }
