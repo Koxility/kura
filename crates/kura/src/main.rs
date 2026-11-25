@@ -91,6 +91,13 @@ async fn serve() -> anyhow::Result<()> {
     if !proxies.is_empty() {
         tracing::info!("believing X-Forwarded-For from {proxies}");
     }
+    // Only whoever reads this log can claim a fresh installation.
+    if let Some(code) = core.setup_code()? {
+        tracing::warn!(
+            "Kura has no account yet. Open it in the browser and enter the setup code {code} \
+             to create the admin. A new code is made at every start until then."
+        );
+    }
 
     // Without its download workers the server is of no use, so either one ending ends both.
     // Stopping drops the running downloads, which ends ffmpeg and removes partial files;

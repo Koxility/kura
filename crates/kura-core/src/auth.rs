@@ -59,8 +59,58 @@ impl Core {
         Ok(!self.store.has_users()?)
     }
 
-    /// Creates the first admin. Returns `None` when the installation already has accounts.
-    pub async fn setup(&self, name: &str, password: &str) -> Result<Option<User>> {
+    /// The one-time code that first-run setup needs, while the installation has no account;
+    /// made on first use and kept until setup is done or Kura stops. Kura logs it at start, so
+    /// only whoever can read the server's log can claim a fresh installation: anyone who only
+    /// reaches the web page, perhaps before its owner, cannot.
+    pub fn setup_code(&self) -> Result<Option<String>> {
+        let mut code = self
+            .setup_code
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !self.needs_setup()? {
+            *code = None;
+            return Ok(None);
+        }
+        if code.is_none() {
+            *code = Some(new_setup_code()?);
+        }
+        Ok(code.clone())
+    }
+
+    /// Creates the first admin with the setup code from the log. Returns `None` when the
+    /// installation already has accounts. Wrong codes are braked per address like logins.
+    pub async fn setup(
+        &self,
+        name: &str,
+        password: &str,
+        code: &str,
+        from: IpAddr,
+    ) -> Result<Option<User>> {
+        if !self.needs_setup()? {
+            return Ok(None);
+        }
+        check(name, password)?;
+        self.count_other_try(from, SETUP_BRAKE.to_owned())?;
+        let expected = self.setup_code()?.unwrap_or_default();
+        if expected.is_empty() || !same_code(&expected, code) {
+            return Err(CoreError::Invalid(
+                "the setup code is wrong; Kura writes it to its log when it starts",
+            ));
+        }
+        let created = self.first_admin(name, password).await?;
+        if created.is_some() {
+            *self
+                .setup_code
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = None;
+        }
+        Ok(created)
+    }
+
+    /// Creates the first admin, without a setup code. Returns `None` when the installation
+    /// already has accounts.
+    pub(crate) async fn first_admin(&self, name: &str, password: &str) -> Result<Option<User>> {
         let name = check(name, password)?;
         let hash = hash(password).await?;
         Ok(self.store.create_first_admin(name, &hash)?)
@@ -355,6 +405,45 @@ fn count_in(tries: &mut LoginTries, key: &(IpAddr, String)) -> Result<()> {
 pub(crate) const EMAIL_TAKEN: CoreError =
     CoreError::Conflict("another account already uses this email address, or was invited with it");
 
+/// The brake's key for setup codes, next to the login brake's names.
+const SETUP_BRAKE: &str = "\0setup";
+
+/// 32 letters a person reads off a log and types without mixing them up: no I, O, 0 or 1.
+const CODE_LETTERS: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/// 12 random letters (60 bits) in groups of four, e.g. `K7QM-3XWD-PA9T`.
+fn new_setup_code() -> Result<String> {
+    let mut bytes = [0u8; 12];
+    getrandom::fill(&mut bytes).map_err(|err| CoreError::Hashing(err.to_string()))?;
+    let mut code = String::with_capacity(14);
+    for (index, byte) in bytes.iter().enumerate() {
+        if index > 0 && index % 4 == 0 {
+            code.push('-');
+        }
+        // 256 is a multiple of 32, so every letter is equally likely: 5 bits each.
+        code.push(CODE_LETTERS[usize::from(*byte) % CODE_LETTERS.len()] as char);
+    }
+    Ok(code)
+}
+
+/// Whether a typed code is the expected one, however it is spaced or cased. Takes as long for
+/// a near miss as for a far one.
+fn same_code(expected: &str, typed: &str) -> bool {
+    let plain = |code: &str| -> Vec<u8> {
+        code.bytes()
+            .filter(|byte| !matches!(byte, b'-' | b' ' | b'\t'))
+            .map(|byte| byte.to_ascii_uppercase())
+            .collect()
+    };
+    let (expected, typed) = (plain(expected), plain(typed));
+    expected.len() == typed.len()
+        && expected
+            .iter()
+            .zip(&typed)
+            .fold(0u8, |differ, (a, b)| differ | (a ^ b))
+            == 0
+}
+
 /// Start of the brake's key for renaming: per account, next to the login brake's names.
 const RENAME_BRAKE: &str = "\0rename:";
 
@@ -525,20 +614,20 @@ mod tests {
         let core = Core::with_defaults(Store::open_in_memory().unwrap()).unwrap();
         assert!(core.needs_setup().unwrap());
 
-        let short = core.setup("admin", "short").await;
+        let short = core.first_admin("admin", "short").await;
         assert!(matches!(short, Err(CoreError::Invalid(_))));
-        let nameless = core.setup("  ", "long enough").await;
+        let nameless = core.first_admin("  ", "long enough").await;
         assert!(matches!(nameless, Err(CoreError::Invalid(_))));
 
         let admin = core
-            .setup(" admin ", "correct horse")
+            .first_admin(" admin ", "correct horse")
             .await
             .unwrap()
             .unwrap();
         assert_eq!((admin.name.as_str(), admin.role), ("admin", Role::Admin));
         assert!(!core.needs_setup().unwrap());
         assert!(
-            core.setup("second", "correct horse")
+            core.first_admin("second", "correct horse")
                 .await
                 .unwrap()
                 .is_none()
@@ -613,7 +702,10 @@ mod tests {
     #[tokio::test]
     async fn wrong_logins_have_to_wait() {
         let core = Core::with_defaults(Store::open_in_memory().unwrap()).unwrap();
-        core.setup("admin", "correct horse").await.unwrap().unwrap();
+        core.first_admin("admin", "correct horse")
+            .await
+            .unwrap()
+            .unwrap();
         let elsewhere: IpAddr = "2001:db8:1:2::7".parse().unwrap();
 
         for _ in 0..FREE_TRIES {

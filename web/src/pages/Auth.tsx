@@ -23,7 +23,7 @@ function Login({
 }) {
   const client = useQueryClient();
   const submit = useMutation({
-    mutationFn: (form: { name: string; password: string }) =>
+    mutationFn: (form: { name: string; password: string; code?: string }) =>
       api(setup ? "/setup" : "/login", "POST", form),
     onSuccess: () => client.invalidateQueries({ queryKey: ["status"] }),
   });
@@ -31,7 +31,11 @@ function Login({
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    submit.mutate({ name: String(form.get("name")), password: String(form.get("password")) });
+    submit.mutate({
+      name: String(form.get("name")),
+      password: String(form.get("password")),
+      ...(setup && { code: String(form.get("code")) }),
+    });
   }
 
   return (
@@ -43,9 +47,32 @@ function Login({
             ? "Create the admin account. It manages settings and other users."
             : "Log in to continue."}
         </p>
+        {setup && (
+          <label className={ui.field}>
+            Setup code
+            <input
+              className={ui.input}
+              name="code"
+              autoComplete="one-time-code"
+              placeholder="XXXX-XXXX-XXXX"
+              spellCheck={false}
+              required
+              autoFocus
+            />
+            <span className={ui.muted}>
+              Kura writes it to its log when it starts, e.g. <code>docker compose logs kura</code>.
+            </span>
+          </label>
+        )}
         <label className={ui.field}>
           Name
-          <input className={ui.input} name="name" autoComplete="username" required autoFocus />
+          <input
+            className={ui.input}
+            name="name"
+            autoComplete="username"
+            required
+            autoFocus={!setup}
+          />
         </label>
         <label className={ui.field}>
           Password

@@ -431,16 +431,32 @@ fn suggested_library_path() -> Option<String> {
     })
 }
 
+#[derive(Deserialize)]
+struct SetupForm {
+    name: String,
+    password: String,
+    /// The one-time code Kura writes to its log on a fresh installation.
+    #[serde(default)]
+    code: String,
+}
+
+/// Creates the first admin, with the setup code from the server's log, and logs it in.
 async fn setup(
     State(core): App,
     from: ConnectInfo<SocketAddr>,
     proxies: Proxies,
     headers: HeaderMap,
-    Json(form): Json<Credentials>,
+    Json(form): Json<SetupForm>,
 ) -> ApiResult<Response> {
-    if core.setup(&form.name, &form.password).await?.is_none() {
+    let client = proxies.client(from.ip(), &headers);
+    let created = core.setup(&form.name, &form.password, &form.code, client.address);
+    if created.await?.is_none() {
         return Err(error(StatusCode::CONFLICT, "Kura is already set up"));
     }
+    let form = Credentials {
+        name: form.name,
+        password: form.password,
+    };
     login(State(core), from, proxies, headers, Json(form)).await
 }
 

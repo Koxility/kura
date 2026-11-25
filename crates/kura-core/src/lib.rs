@@ -222,6 +222,8 @@ pub struct Core {
     /// invite links per token. Kept apart from `logins`, so filling this list with made-up
     /// names, which is cheap, cannot clear the login brake.
     links: Mutex<auth::LoginTries>,
+    /// The one-time code first-run setup needs, while there is no account yet.
+    setup_code: Mutex<Option<String>>,
     /// Series folders Jellyfin is asked to scan once the queue is empty.
     pending_scan: Mutex<jellyfin::Pending>,
     /// The folder of the database, which also holds the theme song.
@@ -279,6 +281,7 @@ impl Core {
             found: Mutex::default(),
             logins: Mutex::default(),
             links: Mutex::default(),
+            setup_code: Mutex::default(),
             pending_scan: Mutex::default(),
             data_dir: Mutex::default(),
             songs_lock: Mutex::default(),

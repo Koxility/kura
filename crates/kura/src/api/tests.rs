@@ -7,6 +7,8 @@ use super::*;
 struct Server {
     http: Client,
     base: String,
+    /// The code first-run setup needs, as Kura logs it.
+    setup_code: String,
 }
 
 impl Server {
@@ -17,12 +19,14 @@ impl Server {
     /// A server that believes `X-Forwarded-For` from `proxies`.
     async fn behind(proxies: TrustedProxies) -> Self {
         let core = Core::with_defaults(Store::open_in_memory().unwrap()).unwrap();
+        let setup_code = core.setup_code().unwrap().unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         tokio::spawn(serve(listener, core, proxies));
         Self {
             http: Client::new(),
             base,
+            setup_code,
         }
     }
 
@@ -46,9 +50,9 @@ impl Server {
         self.call(Method::GET, path, cookie, Value::Null).await
     }
 
-    /// Logs in through `path` and returns the session cookie.
+    /// Logs in through `path` and returns the session cookie; `/setup` with the setup code.
     async fn log_in(&self, path: &str, name: &str, password: &str) -> String {
-        let form = json!({ "name": name, "password": password });
+        let form = json!({ "name": name, "password": password, "code": self.setup_code });
         let response = self.request(Method::POST, path, "").json(&form);
         let response = response.send().await.unwrap();
         assert_eq!(response.status(), 200);
@@ -1908,4 +1912,42 @@ async fn names_cannot_be_probed_at_speed() {
             .0,
         200
     );
+}
+
+/// Audit finding: whoever reached a fresh installation first became its admin. Setup now
+/// needs the one-time code Kura writes to its log, which only the owner of the server reads.
+#[tokio::test]
+async fn a_fresh_installation_needs_the_setup_code_from_the_log() {
+    let server = Server::start().await;
+    let code = server.setup_code.clone();
+    assert_eq!(code.len(), 14, "{code}");
+    let setup = |code: Option<&str>| {
+        let mut form = json!({ "name": "first-comer", "password": "correct horse" });
+        if let Some(code) = code {
+            form["code"] = json!(code);
+        }
+        let server = &server;
+        async move { server.call(Method::POST, "/setup", "", form).await.0 }
+    };
+    assert_eq!(setup(None).await, 400);
+    assert_eq!(setup(Some("AAAA-AAAA-AAAA")).await, 400);
+    let (_, status) = server.get("/status", "").await;
+    assert_eq!(status["needs_setup"], true);
+    // However it is typed: lower case, without dashes.
+    let typed = code.replace('-', "").to_lowercase();
+    assert_eq!(setup(Some(&typed)).await, 200);
+    // Once only, and then setup is closed anyway.
+    assert_eq!(setup(Some(&code)).await, 409);
+}
+
+#[tokio::test]
+async fn setup_codes_cannot_be_guessed_at_speed() {
+    let server = Server::start().await;
+    let mut codes = Vec::new();
+    for _ in 0..6 {
+        let form =
+            json!({ "name": "first-comer", "password": "correct horse", "code": "AAAA-AAAA-AAAA" });
+        codes.push(server.call(Method::POST, "/setup", "", form).await.0);
+    }
+    assert_eq!(codes, [400, 400, 400, 400, 400, 429], "{codes:?}");
 }

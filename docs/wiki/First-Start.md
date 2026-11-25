@@ -2,7 +2,9 @@
 
 ## 1. Admin account
 
-Open Kura in your browser (`http://<your server>:8787`). The first page asks for a name and a password (at least 8 characters). This account is the admin: it manages settings, libraries, users and requests.
+Open Kura in your browser (`http://<your server>:8787`). The first page asks for the setup code, a name and a password (at least 8 characters). This account is the admin: it manages settings, libraries, users and requests.
+
+The setup code is in Kura's log, e.g. `docker compose logs kura`: *Kura has no account yet. Open it in the browser and enter the setup code K7QM-3XWD-PA9T …*. Case and dashes do not matter. It only exists until the admin is created, and every start makes a new one. That way only whoever runs the server can set it up, not someone who reaches the page first.
 
 To reset a forgotten password by mail later, give the account an email address (Settings → Account) and set up a mail server under Settings → Administration → Mail. Without that, choose a password you keep, or create a second admin.
 
