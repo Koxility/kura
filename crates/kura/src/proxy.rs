@@ -5,7 +5,8 @@
 
 use std::{
     net::IpAddr,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use axum::http::HeaderMap;
@@ -34,8 +35,22 @@ pub struct Client {
     pub https: bool,
 }
 
-/// Logged once, so the hint does not fill the log.
-static HINTED: AtomicBool = AtomicBool::new(false);
+/// When the hint about an untrusted proxy was last logged (Unix seconds): at most hourly, so
+/// it stays visible in a long log without filling it.
+static HINTED_AT: AtomicU64 = AtomicU64::new(0);
+const HINT_EVERY: u64 = 60 * 60;
+
+/// Whether the hint is due now; marks it as given.
+fn hint_due() -> bool {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    let last = HINTED_AT.load(Ordering::Relaxed);
+    (last == 0 || now.saturating_sub(last) >= HINT_EVERY)
+        && HINTED_AT
+            .compare_exchange(last, now.max(1), Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+}
 
 impl TrustedProxies {
     /// Reads `KURA_TRUSTED_PROXIES`; unset or empty trusts nobody.
@@ -93,10 +108,12 @@ impl TrustedProxies {
             .map(str::trim)
             .collect();
         if !self.contains(peer) {
-            if !forwarded.is_empty() && !HINTED.swap(true, Ordering::Relaxed) {
+            if !forwarded.is_empty() && hint_due() {
                 tracing::warn!(
                     "a request from {peer} names the address it was forwarded for, which is \
-                     ignored; if {peer} is your reverse proxy, add it to KURA_TRUSTED_PROXIES"
+                     ignored; if {peer} is your reverse proxy, add it to KURA_TRUSTED_PROXIES. \
+                     Until then everyone behind it counts as {peer}: a few wrong logins for a \
+                     name, or a few reset requests, hold up everyone for that name"
                 );
             }
             return Client {

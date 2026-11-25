@@ -47,7 +47,7 @@ Kura has no HTTPS of its own. To reach it from outside your home network, put it
 ### Behind a reverse proxy
 
 1. **Only the proxy reaches Kura.** If the proxy runs on the same machine, publish the port on the loopback address only: `"127.0.0.1:8787:8787"`. Otherwise allow port 8787 only from the proxy in the firewall.
-2. **The proxy tells Kura who is asking.** Every connection Kura sees comes from the proxy. To slow down wrong logins per person and not for everyone at once, the proxy sends the person's address in `X-Forwarded-For`, and `KURA_TRUSTED_PROXIES` names the proxy's address as Kura sees it. Without it, Kura ignores the header, because anyone can send one. If you don't know the address, log in once: Kura's log then names it (`a request from 172.17.0.1 names the address it was forwarded for…`). Only name addresses nobody else can connect from.
+2. **The proxy tells Kura who is asking.** Every connection Kura sees comes from the proxy. To slow down wrong logins and repeated reset requests per person and not for everyone at once, the proxy sends the person's address in `X-Forwarded-For`, and `KURA_TRUSTED_PROXIES` names the proxy's address as Kura sees it. Without it, Kura ignores the header, because anyone can send one. If you don't know the address, log in once: Kura's log then names it (`a request from 172.17.0.1 names the address it was forwarded for…`). Only name addresses nobody else can connect from.
 3. **HTTPS only.** Redirect plain HTTP to HTTPS. When the proxy also sends `X-Forwarded-Proto: https`, Kura marks the login cookie `Secure`, so a browser never sends it over plain HTTP.
 
 HAProxy, with Kura on the same machine and port 8787 published as `127.0.0.1:8787:8787`:

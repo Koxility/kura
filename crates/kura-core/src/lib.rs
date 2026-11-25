@@ -212,6 +212,10 @@ pub struct Core {
     found: Mutex<downloaded::FoundTitles>,
     /// Wrong logins per address and name, so passwords cannot be guessed at speed.
     logins: Mutex<auth::LoginTries>,
+    /// Tries per address and target for what a mailed link opens: reset requests per name,
+    /// invite links per token. Kept apart from `logins`, so filling this list with made-up
+    /// names, which is cheap, cannot clear the login brake.
+    links: Mutex<auth::LoginTries>,
     /// Series folders Jellyfin is asked to scan once the queue is empty.
     pending_scan: Mutex<jellyfin::Pending>,
     /// The folder of the database, which also holds the theme song.
@@ -268,6 +272,7 @@ impl Core {
             scan: Mutex::default(),
             found: Mutex::default(),
             logins: Mutex::default(),
+            links: Mutex::default(),
             pending_scan: Mutex::default(),
             data_dir: Mutex::default(),
             songs_lock: Mutex::default(),

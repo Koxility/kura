@@ -124,30 +124,16 @@ impl Core {
 
     /// Counts one login try, or refuses it while a pause is running.
     pub(crate) fn count_try(&self, key: &(IpAddr, String)) -> Result<()> {
-        let now = Instant::now();
-        let mut tries = self.login_tries();
-        if tries.len() >= MOST_TRACKED && !tries.contains_key(key) {
-            tries.retain(|_, tried| !tried.forgotten(now));
-            if tries.len() >= MOST_TRACKED {
-                tries.clear();
-            }
-        }
-        let tried = tries.entry(key.clone()).or_insert(Tries {
-            count: 0,
-            last: now,
-            paused_until: None,
-        });
-        if tried.forgotten(now) {
-            tried.count = 0;
-        }
-        if let Some(until) = tried.paused_until.filter(|until| *until > now) {
-            let seconds = until.duration_since(now).as_secs().max(1);
-            return Err(CoreError::TooManyLogins(seconds));
-        }
-        tried.count += 1;
-        tried.last = now;
-        tried.paused_until = pause_after(tried.count).map(|pause| now + pause);
-        Ok(())
+        count_in(&mut self.login_tries(), key)
+    }
+
+    /// Counts one try at something a mailed link opens, in a list of its own; refused like a
+    /// login while a pause is running.
+    pub(crate) fn count_link(&self, key: &(IpAddr, String)) -> Result<()> {
+        count_in(
+            &mut self.links.lock().unwrap_or_else(PoisonError::into_inner),
+            key,
+        )
     }
 
     fn login_tries(&self) -> std::sync::MutexGuard<'_, LoginTries> {
@@ -309,6 +295,33 @@ impl Core {
         }
         Ok(self.store.api_key_user(&token_hash(secret), now())?)
     }
+}
+
+/// Counts one try for `key` in `tries`, or refuses it while a pause is running.
+fn count_in(tries: &mut LoginTries, key: &(IpAddr, String)) -> Result<()> {
+    let now = Instant::now();
+    if tries.len() >= MOST_TRACKED && !tries.contains_key(key) {
+        tries.retain(|_, tried| !tried.forgotten(now));
+        if tries.len() >= MOST_TRACKED {
+            tries.clear();
+        }
+    }
+    let tried = tries.entry(key.clone()).or_insert(Tries {
+        count: 0,
+        last: now,
+        paused_until: None,
+    });
+    if tried.forgotten(now) {
+        tried.count = 0;
+    }
+    if let Some(until) = tried.paused_until.filter(|until| *until > now) {
+        let seconds = until.duration_since(now).as_secs().max(1);
+        return Err(CoreError::TooManyLogins(seconds));
+    }
+    tried.count += 1;
+    tried.last = now;
+    tried.paused_until = pause_after(tried.count).map(|pause| now + pause);
+    Ok(())
 }
 
 /// More scenes than anyone keeps; bounds what one account stores.

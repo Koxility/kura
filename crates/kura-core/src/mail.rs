@@ -32,8 +32,9 @@ const MAIL_TIMEOUT: Duration = Duration::from_secs(20);
 /// The longest name or address a reset is asked for.
 const MOST_NAME: usize = 254;
 
-/// Key of the per-address brake on reset requests, next to the login brake's names.
-const RESET_BRAKE: &str = "\0password-reset";
+/// Start of the brake's key for reset requests: per address and the name or email asked
+/// for, so one person asking too often holds up only their own requests.
+const RESET_BRAKE: &str = "\0password-reset:";
 
 const LAYOUT: &str = include_str!("mail/layout.html");
 
@@ -108,11 +109,13 @@ impl Core {
         if !self.store.mail()?.enabled() {
             return Err(CoreError::MailNotSetUp);
         }
-        self.count_reset_request(from)?;
         let wanted = name_or_email.trim().to_owned();
+        // No account has such a name or address; this also keeps them out of the brake's list.
         if wanted.is_empty() || wanted.chars().count() > MOST_NAME {
             return Ok(());
         }
+        let target = format!("{RESET_BRAKE}{}", wanted.to_lowercase());
+        self.count_reset_request(from, target)?;
         let core = self.clone();
         tokio::spawn(async move {
             if let Err(err) = core.send_reset_links(&wanted) {
@@ -167,14 +170,10 @@ impl Core {
         Ok(true)
     }
 
-    /// The per-address brake for everything a mailed link opens: reset requests, invites.
-    pub(crate) fn count_link_try(&self, from: IpAddr) -> Result<()> {
-        self.count_reset_request(from)
-    }
-
-    /// The per-address brake for reset requests, like the one for logins.
-    fn count_reset_request(&self, from: IpAddr) -> Result<()> {
-        self.count_try(&(crate::auth::network(from), RESET_BRAKE.to_owned()))
+    /// The brake for everything a mailed link opens, per address and `target` (what is asked
+    /// for: a name, an email, a link's token), like the one for logins per address and name.
+    pub(crate) fn count_reset_request(&self, from: IpAddr, target: String) -> Result<()> {
+        self.count_link(&(crate::auth::network(from), target))
             .map_err(|err| match err {
                 CoreError::TooManyLogins(seconds) => CoreError::TooManyResets(seconds),
                 other => other,

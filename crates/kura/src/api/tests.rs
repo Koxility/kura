@@ -1042,26 +1042,45 @@ async fn a_reset_link_works_once_and_tells_nobody_who_has_an_account() {
     server.log_in("/login", "sam", "a new password").await;
 }
 
+/// Audit finding: the brake counted per address only, so behind a proxy (or on one network)
+/// five requests for any name held up resets and invite links for everyone. It now counts per
+/// address and what is asked for.
 #[tokio::test]
-async fn reset_requests_are_braked_per_address() {
+async fn reset_requests_are_braked_per_address_and_name() {
     let server = Server::start().await;
     let admin = server.log_in("/setup", "admin", "correct horse").await;
     let (port, _mails) = fake_mail_server().await;
     server
         .call(Method::PUT, "/admin/mail", &admin, plain_mail_server(port))
         .await;
-    let mut codes = Vec::new();
-    for name in 0..8 {
-        let form = json!({ "name": format!("someone{name}") });
-        codes.push(
+    let server = &server;
+    let ask = |name: &str| {
+        let form = json!({ "name": name });
+        async move {
             server
                 .call(Method::POST, "/password-reset", "", form)
                 .await
-                .0,
-        );
+                .0
+        }
+    };
+    let mut codes = Vec::new();
+    for _ in 0..8 {
+        codes.push(ask("someone").await);
     }
     assert_eq!(&codes[..5], &[202; 5]);
     assert_eq!(codes[7], 429, "{codes:?}");
+    // However the name is written, it is the same name.
+    assert_eq!(ask(" SOMEONE ").await, 429);
+    // Someone else, from the same address, is not held up, and neither are invite links.
+    assert_eq!(ask("sam").await, 202);
+    let check = json!({ "token": "a".repeat(64) });
+    assert_eq!(
+        server
+            .call(Method::POST, "/register/check", "", check)
+            .await
+            .0,
+        400
+    );
 }
 
 #[tokio::test]
