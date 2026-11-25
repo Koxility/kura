@@ -121,4 +121,4 @@ The menu opens to four parts:
 
 ### Password reset
 
-With a mail server set up, the login page shows **Forgot password?**. Anyone enters a name or an email address; if an account with an email matches, a link is sent there. The page answers the same way whether or not the account exists. The link works once and for 30 minutes; a new link for the same account is sent at most every 2 minutes, and one address may ask 5 times before it has to wait. Setting a new password with it logs the account out everywhere, deletes its API keys and ends other links.
+With a mail server set up, the login page shows **Forgot password?**. Anyone enters a name or an email address; if an account with an email matches, a link is sent there. The page answers the same way whether or not the account exists. The link works once and for 30 minutes; a new link for the same account is sent at most every 2 minutes, and the same name or email may be asked for 5 times from one address before that address has to wait for it; other names are not held up. Setting a new password with it logs the account out everywhere, deletes its API keys and ends other links.
