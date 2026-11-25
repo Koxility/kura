@@ -269,8 +269,11 @@ pub struct Account {
     pub id: i64,
     pub name: String,
     pub role: Role,
-    /// Where a password reset link is sent.
+    /// Where a password reset link is sent; only an address whose confirmation link was opened.
     pub email: Option<String>,
+    /// A new address that waits for its confirmation link to be opened.
+    #[serde(default)]
+    pub pending_email: Option<String>,
     pub theme: Theme,
     /// Whether the web app asks once for an email address: none is set, and the account has
     /// not said "not now" yet.

@@ -26,7 +26,8 @@ Sites are `aniworld` or `serienstream`; languages are `german_dub`, `german_sub`
 | Method and path | Who | What |
 |---|---|---|
 | `GET /status` | anyone | The caller (`user`, or `null`), enabled `sites`, `defaults`; `version`, `commit` and `latest_version` only for a logged-in caller (`null` otherwise) |
-| `GET /account` | user | Own name, role, email, theme, and `ask_email` (the web app asks once for an email) |
+| `GET /account` | user | Own name, role, `email` (where reset links go), `pending_email` (a new address waiting for its confirmation link), theme, and `ask_email` (the web app asks once for an email while mail is set up) |
+| `POST /account/email/confirm` | anyone with the link | `{ token }` from the link mailed to a new address (`…/confirm-email#token=…`): the address becomes the account's email, `204`; `400` for a used or expired link, `409` when another account or an invite has the address by now |
 | `POST /password-reset` | anyone | `{ name }` (a name or an email): answers `202` the same for every name; `503` without a mail server, `429` when asked too often |
 | `POST /register/check` | anyone | `{ token }` from an invite link (`…/register#token=…`): the invited `email` and `role`, or `400` |
 | `POST /register` | anyone with an invite | `{ token, name, password }`: creates the account with the invite's email and role and logs it in; `400` for a used or expired invite, `409` for a taken name. There is no sign-up without an invite. |

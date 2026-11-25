@@ -128,6 +128,8 @@ impl Core {
             match self.store.redeem_invite(&token, name, &hashed, now())? {
                 Redeemed::Created(user) => Registered::Created(user),
                 Redeemed::NameTaken => Registered::NameTaken,
+                // An account took the address after the invite went out.
+                Redeemed::EmailTaken => return Err(crate::auth::EMAIL_TAKEN),
                 Redeemed::Invalid => Registered::Invalid,
             },
         )

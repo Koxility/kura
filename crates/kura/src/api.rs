@@ -74,6 +74,7 @@ fn router(core: Arc<Core>) -> Router {
         .route("/account/name", put(rename))
         .route("/account/email", put(set_email))
         .route("/account/email/skip", post(skip_email))
+        .route("/account/email/confirm", post(confirm_email))
         .route("/account/theme", put(set_theme))
         .route("/account/keys", get(api_keys).post(create_api_key))
         .route("/account/keys/{id}", delete(delete_api_key))
@@ -658,8 +659,30 @@ async fn set_email(
         };
         return Err(error(StatusCode::FORBIDDEN, message));
     }
-    core.set_email(&session.user, &form.email)?;
+    // A new address counts once the link mailed to it is opened; the account then shows it
+    // as `pending_email`.
+    core.change_email(&session.user, &form.email).await?;
     Ok(Json(core.account(&session.user)?))
+}
+
+/// Opens the link mailed to a new address; whoever has the link may, also logged out or in
+/// another browser.
+async fn confirm_email(
+    State(core): App,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    Extension(proxies): Proxies,
+    headers: HeaderMap,
+    Json(form): Json<InviteToken>,
+) -> ApiResult<StatusCode> {
+    let client = proxies.client(from.ip(), &headers);
+    if core.confirm_email(&form.token, client.address)? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(error(
+            StatusCode::BAD_REQUEST,
+            "this link has expired or was already used; enter the address again for a new one",
+        ))
+    }
 }
 
 /// "Not now" to the email prompt after login; it is not shown again.
@@ -781,15 +804,21 @@ async fn create_user(
     _: BrowserAdmin,
     Json(new): Json<NewUser>,
 ) -> ApiResult<Json<User>> {
-    // Checked before the account exists, so a typo does not leave a half-made user.
-    if !new.email.trim().is_empty() {
-        kura_core::check_email(&new.email)?;
+    // Checked before the account exists, so a typo or a taken address does not leave a
+    // half-made user.
+    let email = new.email.trim();
+    if !email.is_empty() {
+        core.check_email_free(email)?;
     }
     let created = core.create_user(&new.name, &new.password, new.role).await?;
     let taken = || error(StatusCode::CONFLICT, "this name is taken");
     let created = created.ok_or_else(taken)?;
-    if !new.email.trim().is_empty() {
-        core.set_user_email(created.id, &new.email)?;
+    if !email.is_empty()
+        && let Err(err) = core.set_user_email(created.id, email)
+    {
+        // Someone took the address in the meantime.
+        core.delete_user(created.id)?;
+        return Err(err.into());
     }
     Ok(Json(created))
 }

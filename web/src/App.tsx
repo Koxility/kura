@@ -15,6 +15,7 @@ import {
 import styles from "./App.module.css";
 import { Auth } from "./pages/Auth";
 import { AutoSyncPage } from "./pages/AutoSync";
+import { ConfirmEmail } from "./pages/ConfirmEmail";
 import { CalendarPage } from "./pages/Calendar";
 import { Home } from "./pages/Home";
 import { LibraryPage } from "./pages/Library";
@@ -46,6 +47,8 @@ export function App() {
   if (pathname === "/reset-password") return <ResetPassword />;
   // An invite link, likewise; without a valid invite the page offers nothing.
   if (pathname === "/register") return <Register />;
+  // The link that confirms a new email address, likewise.
+  if (pathname === "/confirm-email") return <ConfirmEmail />;
   if (status.isPending) return null;
   if (status.isError) {
     return (
@@ -126,7 +129,7 @@ function Shell({ status }: { status: Status }) {
       </header>
       <ThemeEffects />
       <main className={styles.main}>
-        <EmailPrompt mailOn={status.password_reset} />
+        <EmailPrompt />
         {status.needs_library && admin ? (
           <LibrarySetup suggestedPath={status.suggested_library_path} />
         ) : (
@@ -138,23 +141,29 @@ function Shell({ status }: { status: Status }) {
   );
 }
 
-/** Asks once, after login, in a centred modal, for an email address to send a reset link to.
- *  Optional: "Not now" (or closing it) ends it for good, on every device. Right after logging in no password is needed; later the
- *  server asks for it and the card shows the field. */
-function EmailPrompt({ mailOn }: { mailOn: boolean }) {
+/** Asks once, after login, in a centred modal, for an email address to send a reset link to;
+ *  the server only asks while mail is set up. Optional: "Not now" (or closing it) ends it for
+ *  good, on every device. Right after logging in no password is needed; later the server asks
+ *  for it and the card shows the field. The address counts once the link mailed to it is
+ *  opened, which the card says before it closes. */
+function EmailPrompt() {
   const client = useQueryClient();
   const account = useQuery(accountQuery);
   const { pathname } = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [needsPassword, setNeedsPassword] = useState(false);
+  const [sent, setSent] = useState("");
   const done = (next?: Account) => {
     if (next) client.setQueryData(accountQuery.queryKey, next);
     else client.invalidateQueries({ queryKey: accountQuery.queryKey });
   };
   const save = useMutation({
     mutationFn: () => api<Account>("/account/email", "PUT", { email, password }),
-    onSuccess: done,
+    onSuccess: (next) => {
+      setSent(next.pending_email ?? "");
+      done(next);
+    },
     onError: (error) => {
       if (error.message.includes("password")) setNeedsPassword(true);
     },
@@ -163,6 +172,21 @@ function EmailPrompt({ mailOn }: { mailOn: boolean }) {
     mutationFn: () => api("/account/email/skip", "POST"),
     onSuccess: () => done(),
   });
+  if (sent) {
+    return (
+      <Modal
+        title="Check your inbox"
+        lead={`A link went to ${sent}. Open it to confirm the address; until then, reset links do not go there. It works for 24 hours.`}
+        onClose={() => setSent("")}
+      >
+        <div className={ui.modalActions}>
+          <button type="button" className={ui.primary} onClick={() => setSent("")}>
+            OK
+          </button>
+        </div>
+      </Modal>
+    );
+  }
   // The account page has its own email field.
   if (!account.data?.ask_email || pathname === "/settings/account") return null;
 
@@ -174,11 +198,7 @@ function EmailPrompt({ mailOn }: { mailOn: boolean }) {
   return (
     <Modal
       title="Add an email address"
-      lead={
-        mailOn
-          ? "If you forget your password, a link to choose a new one is sent there. Optional; you can add it later under Settings → Account."
-          : "If you forget your password, a link to choose a new one can be sent there once an admin sets up mail. Optional; you can add it later under Settings → Account."
-      }
+      lead="If you forget your password, a link to choose a new one is sent there. Optional; you can add it later under Settings → Account."
       onClose={() => skip.mutate()}
       locked={save.isPending || skip.isPending}
     >

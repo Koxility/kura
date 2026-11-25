@@ -193,9 +193,13 @@ impl Core {
 
     // The own account
 
+    /// The own account. The web app asks for an email only while one could be used, that is
+    /// while a mail server is set up.
     pub fn account(&self, user: &User) -> Result<Account> {
         let account = self.store.account(user.id)?;
-        account.ok_or(CoreError::Invalid("this account no longer exists"))
+        let mut account = account.ok_or(CoreError::Invalid("this account no longer exists"))?;
+        account.ask_email &= self.store.mail()?.enabled();
+        Ok(account)
     }
 
     /// Returns `false` when another user has the name.
@@ -204,18 +208,25 @@ impl Core {
         Ok(self.store.rename_user(user.id, name)?)
     }
 
-    /// Stores an email address, or none for an empty one. Nothing is sent to it yet.
-    pub fn set_email(&self, user: &User, email: &str) -> Result<()> {
-        self.set_email_of(user.id, email)
-    }
-
-    /// An admin sets the email of any user; `false` when there is no such user.
+    /// An admin sets the email of any user, at once and without a confirmation mail: the
+    /// admin answers for the address. `false` when there is no such user; refused when another
+    /// account or an open invite has the address.
     pub fn set_user_email(&self, id: i64, email: &str) -> Result<bool> {
         if !self.store.users()?.iter().any(|user| user.id == id) {
             return Ok(false);
         }
-        self.set_email_of(id, email)?;
+        self.set_email_now(id, email)?;
         Ok(true)
+    }
+
+    /// Refuses an address that is not one, or that another account or an open invite has.
+    pub fn check_email_free(&self, email: &str) -> Result<()> {
+        let email = email.trim();
+        check_email(email)?;
+        if self.store.email_taken(email, None, now())? {
+            return Err(EMAIL_TAKEN);
+        }
+        Ok(())
     }
 
     /// Users' email entries; for admins.
@@ -223,14 +234,18 @@ impl Core {
         Ok(self.store.user_entries()?)
     }
 
-    fn set_email_of(&self, id: i64, email: &str) -> Result<()> {
+    /// Sets an email, or clears it for an empty one, without asking the address first.
+    pub(crate) fn set_email_now(&self, id: i64, email: &str) -> Result<()> {
         let email = email.trim();
         if !email.is_empty() {
             check_email(email)?;
         }
-        Ok(self
-            .store
-            .set_email(id, Some(email).filter(|email| !email.is_empty()))?)
+        let email = Some(email).filter(|email| !email.is_empty());
+        if self.store.set_email(id, email, now())? {
+            Ok(())
+        } else {
+            Err(EMAIL_TAKEN)
+        }
     }
 
     pub fn set_theme(&self, user: &User, theme: &Theme) -> Result<()> {
@@ -323,6 +338,10 @@ fn count_in(tries: &mut LoginTries, key: &(IpAddr, String)) -> Result<()> {
     tried.paused_until = pause_after(tried.count).map(|pause| now + pause);
     Ok(())
 }
+
+/// Every account has its own email address, and an invited address is kept for its invite.
+pub(crate) const EMAIL_TAKEN: CoreError =
+    CoreError::Conflict("another account already uses this email address, or was invited with it");
 
 /// More scenes than anyone keeps; bounds what one account stores.
 const MOST_ASCII_PIECES: usize = 100;

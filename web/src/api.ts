@@ -84,10 +84,13 @@ export interface Song {
 
 /** The own account, as Settings → User shows it. */
 export interface Account extends User {
-  /** Stored, not used yet. */
+  /** Where reset links go: an address whose confirmation link was opened. */
   email: string | null;
+  /** A new address that waits until the link mailed to it is opened. */
+  pending_email: string | null;
   theme: Theme;
-  /** Asked once after login to add an email: none is set and "not now" was not chosen yet. */
+  /** Asked once after login to add an email: mail is set up, none is set or waiting, and "not
+   *  now" was not chosen yet. */
   ask_email: boolean;
 }
 

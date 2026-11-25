@@ -12,7 +12,7 @@ use kura_domain::{
     Account, ApiKey, EpisodeId, Invite, Job, Language, Mail, Picked, Request, RequestState, Role,
     Settings, Theme, User, UserEntry,
 };
-use rusqlite::{Connection, OptionalExtension, Row, params, types::Type};
+use rusqlite::{Connection, OptionalExtension, Row, functions::FunctionFlags, params, types::Type};
 use rusqlite_migration::{M, Migrations};
 
 #[derive(Debug, thiserror::Error)]
@@ -134,13 +134,37 @@ CREATE TABLE invites (
 );
 ";
 
+/// Added after 1.5.1: a new email address waits here until the link mailed to it is opened.
+/// Only the SHA-256 of the link's token is kept; one change per account at a time.
+const EMAIL_CHANGES: &str = "
+CREATE TABLE email_changes (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    email      TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at INTEGER NOT NULL
+);
+";
+
 /// What became of an invite link that someone used to create an account.
 #[derive(Debug, PartialEq)]
 pub enum Redeemed {
     Created(User),
     /// Another account has the name; the invite still works with another one.
     NameTaken,
+    /// Another account has the invite's email address by now.
+    EmailTaken,
     /// No such invite, used up, or expired.
+    Invalid,
+}
+
+/// What became of opening the link that confirms a new email address.
+#[derive(Debug, PartialEq)]
+pub enum EmailConfirmed {
+    /// The account's email is now this address.
+    Changed { user_id: i64, email: String },
+    /// Another account or an invite has the address by now; the link is used up.
+    Taken,
+    /// No such link, used up, or expired.
     Invalid,
 }
 
@@ -200,6 +224,18 @@ impl Store {
 
     fn init(mut conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "foreign_keys", "ON")?;
+        // SQLite's own `lower()` folds only A to Z; email addresses are compared with this,
+        // so `Ärger@example.org` and `ärger@example.org` are one address too.
+        conn.create_scalar_function(
+            "casefold",
+            1,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+            |ctx| {
+                Ok(ctx
+                    .get::<Option<String>>(0)?
+                    .map(|text| text.to_lowercase()))
+            },
+        )?;
         Migrations::new(vec![
             M::up(SCHEMA),
             M::up(REQUESTS_AND_IMDB),
@@ -208,6 +244,7 @@ impl Store {
             M::up(MAIL_AND_RESETS),
             M::up(EMAIL_ASKED),
             M::up(INVITES),
+            M::up(EMAIL_CHANGES),
         ])
         .to_latest(&mut conn)?;
         Ok(Self {
@@ -289,7 +326,10 @@ impl Store {
         Ok(self
             .conn()
             .query_row(
-                "SELECT id, name, role, email, theme, email_asked FROM users WHERE id = ?1",
+                "SELECT id, name, role, email, theme, email_asked,
+                     (SELECT c.email FROM email_changes c
+                      WHERE c.user_id = users.id AND c.expires_at > unixepoch())
+                 FROM users WHERE id = ?1",
                 [id],
                 |row| {
                     let theme: Option<String> = row.get(4)?;
@@ -302,8 +342,10 @@ impl Store {
                         theme: theme
                             .and_then(|json| serde_json::from_str(&json).ok())
                             .unwrap_or_default(),
+                        pending_email: row.get(6)?,
                         ask_email: row.get::<_, Option<String>>(3)?.is_none()
-                            && !row.get::<_, bool>(5)?,
+                            && !row.get::<_, bool>(5)?
+                            && row.get::<_, Option<String>>(6)?.is_none(),
                     })
                 },
             )
@@ -320,15 +362,100 @@ impl Store {
         Ok(changed > 0)
     }
 
-    /// Also ends the reset links that are out: they went to the old address.
-    pub fn set_email(&self, id: i64, email: Option<&str>) -> Result<()> {
-        let conn = self.conn();
-        conn.execute(
+    /// Sets or clears a user's email at once. `false` when another account or an invite that
+    /// still works has the address (in any case). Also ends the reset links that are out (they
+    /// went to the old address) and a change that waits for confirmation.
+    pub fn set_email(&self, id: i64, email: Option<&str>, now: i64) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        if let Some(email) = email
+            && (account_has_email(&tx, email, Some(id))? || invited(&tx, email, now)?)
+        {
+            return Ok(false);
+        }
+        tx.execute(
             "UPDATE users SET email = ?2, email_asked = 1 WHERE id = ?1",
             params![id, email],
         )?;
-        conn.execute("DELETE FROM password_resets WHERE user_id = ?1", [id])?;
+        tx.execute("DELETE FROM password_resets WHERE user_id = ?1", [id])?;
+        tx.execute("DELETE FROM email_changes WHERE user_id = ?1", [id])?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Whether another account than `except` has this email, or an invite that still works.
+    pub fn email_taken(&self, email: &str, except: Option<i64>, now: i64) -> Result<bool> {
+        let conn = self.conn();
+        Ok(account_has_email(&conn, email, except)? || invited(&conn, email, now)?)
+    }
+
+    // Email changes. Times are Unix seconds; the caller hashes the token.
+
+    /// Keeps a new address for a user until its link is opened; replaces a change that was
+    /// waiting. `false` when another account or an invite has the address.
+    pub fn start_email_change(
+        &self,
+        user_id: i64,
+        email: &str,
+        token_hash: &str,
+        now: i64,
+        ttl: i64,
+    ) -> Result<bool> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        if account_has_email(&tx, email, Some(user_id))? || invited(&tx, email, now)? {
+            return Ok(false);
+        }
+        tx.execute("DELETE FROM email_changes WHERE expires_at <= ?1", [now])?;
+        tx.execute(
+            "INSERT INTO email_changes (user_id, email, token_hash, expires_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (user_id) DO UPDATE SET email = excluded.email,
+                 token_hash = excluded.token_hash, expires_at = excluded.expires_at",
+            params![user_id, email, token_hash, now + ttl],
+        )?;
+        tx.execute("UPDATE users SET email_asked = 1 WHERE id = ?1", [user_id])?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Forgets the change that waits for a user's confirmation, if any.
+    pub fn cancel_email_change(&self, user_id: i64) -> Result<()> {
+        self.conn()
+            .execute("DELETE FROM email_changes WHERE user_id = ?1", [user_id])?;
         Ok(())
+    }
+
+    /// Uses up the link that confirms a new address, in one transaction: the link must still
+    /// work, and the address must still be free, then it becomes the account's email and the
+    /// reset links to the old address end.
+    pub fn confirm_email_change(&self, token_hash: &str, now: i64) -> Result<EmailConfirmed> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let found = tx
+            .query_row(
+                "DELETE FROM email_changes WHERE token_hash = ?1 AND expires_at > ?2
+                 RETURNING user_id, email",
+                params![token_hash, now],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        tx.execute("DELETE FROM email_changes WHERE expires_at <= ?1", [now])?;
+        let Some((user_id, email)) = found else {
+            tx.commit()?;
+            return Ok(EmailConfirmed::Invalid);
+        };
+        if account_has_email(&tx, &email, Some(user_id))? || invited(&tx, &email, now)? {
+            tx.commit()?;
+            return Ok(EmailConfirmed::Taken);
+        }
+        tx.execute(
+            "UPDATE users SET email = ?2, email_asked = 1 WHERE id = ?1",
+            params![user_id, email],
+        )?;
+        tx.execute("DELETE FROM password_resets WHERE user_id = ?1", [user_id])?;
+        tx.commit()?;
+        Ok(EmailConfirmed::Changed { user_id, email })
     }
 
     // Invites. Times are Unix seconds; the caller hashes the token.
@@ -346,7 +473,7 @@ impl Store {
     ) -> Result<Invite> {
         let conn = self.conn();
         conn.execute(
-            "DELETE FROM invites WHERE lower(email) = lower(?1) OR expires_at <= ?2",
+            "DELETE FROM invites WHERE casefold(email) = casefold(?1) OR expires_at <= ?2",
             params![email, now],
         )?;
         Ok(conn.query_row(
@@ -393,11 +520,7 @@ impl Store {
 
     /// Whether an account already has this email (case-insensitive).
     pub fn email_in_use(&self, email: &str) -> Result<bool> {
-        Ok(self.conn().query_row(
-            "SELECT EXISTS (SELECT 1 FROM users WHERE email IS NOT NULL AND lower(email) = lower(?1))",
-            [email],
-            |row| row.get(0),
-        )?)
+        Ok(account_has_email(&self.conn(), email, None)?)
     }
 
     /// Creates the account an invite link stands for, in one transaction: the invite must still
@@ -428,6 +551,10 @@ impl Store {
         let Some((id, email, role)) = found else {
             return Ok(Redeemed::Invalid);
         };
+        // An account may have taken the address since the invite was sent.
+        if account_has_email(&tx, &email, None)? {
+            return Ok(Redeemed::EmailTaken);
+        }
         let created = tx
             .query_row(
                 "INSERT INTO users (name, password_hash, role, email, email_asked)
@@ -467,7 +594,8 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT id, name, role, email FROM users
-             WHERE name = ?1 OR (email IS NOT NULL AND lower(email) = lower(?1)) ORDER BY id",
+             WHERE name = ?1 OR (email IS NOT NULL AND casefold(email) = casefold(?1))
+             ORDER BY id",
         )?;
         let users = stmt
             .query_map([name_or_email], user_entry)?
@@ -905,6 +1033,30 @@ impl Store {
     }
 }
 
+/// Whether an account other than `except` has this email, in any case.
+fn account_has_email(
+    conn: &Connection,
+    email: &str,
+    except: Option<i64>,
+) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM users WHERE email IS NOT NULL
+             AND casefold(email) = casefold(?1) AND id IS NOT ?2)",
+        params![email, except],
+        |row| row.get(0),
+    )
+}
+
+/// Whether an invite that still works was sent to this email, in any case.
+fn invited(conn: &Connection, email: &str, now: i64) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM invites
+             WHERE casefold(email) = casefold(?1) AND expires_at > ?2)",
+        params![email, now],
+        |row| row.get(0),
+    )
+}
+
 /// Settings saved before the download path became a library: the download path becomes the
 /// main library, so downloads keep going where they went.
 fn upgrade(mut settings: serde_json::Value) -> serde_json::Value {
@@ -1287,7 +1439,11 @@ mod tests {
         // Only the case changes.
         assert!(store.rename_user(other.id, "Sam").unwrap());
 
-        store.set_email(admin.id, Some("boss@example.org")).unwrap();
+        assert!(
+            store
+                .set_email(admin.id, Some("boss@example.org"), 0)
+                .unwrap()
+        );
         let theme = Theme {
             music: false,
             volume: 30,
@@ -1521,7 +1677,7 @@ mod tests {
 
         store.create_reset("two", admin.id, 100, 60).unwrap();
         store
-            .set_email(admin.id, Some("admin@example.org"))
+            .set_email(admin.id, Some("admin@example.org"), 0)
             .unwrap();
         assert_eq!(store.take_reset("two", 101).unwrap(), None);
 
@@ -1539,7 +1695,7 @@ mod tests {
     fn resets_find_users_by_name_or_email() {
         let (store, admin) = store_with_admin();
         store
-            .set_email(admin.id, Some("Admin@Example.org"))
+            .set_email(admin.id, Some("Admin@Example.org"), 0)
             .unwrap();
         let found = |text| {
             store
@@ -1625,6 +1781,110 @@ mod tests {
         assert_eq!(
             store.redeem_invite("four", "lee", "hash", 301).unwrap(),
             Redeemed::Invalid
+        );
+    }
+
+    #[test]
+    fn an_email_change_waits_for_its_link_and_every_address_is_one_account_s() {
+        let (store, admin) = store_with_admin();
+        let sam = store
+            .create_user("sam", "hash", Role::User)
+            .unwrap()
+            .unwrap();
+        assert!(
+            store
+                .set_email(admin.id, Some("Ärger@Example.org"), 100)
+                .unwrap()
+        );
+        // Compared without regard to case, also beyond A to Z.
+        assert!(
+            !store
+                .set_email(sam.id, Some("ärger@example.ORG"), 100)
+                .unwrap()
+        );
+        assert!(store.email_taken("ÄRGER@example.org", None, 100).unwrap());
+        assert!(
+            !store
+                .email_taken("ÄRGER@example.org", Some(admin.id), 100)
+                .unwrap()
+        );
+        assert!(
+            !store
+                .start_email_change(sam.id, "ärger@example.org", "t0", 100, 50)
+                .unwrap()
+        );
+
+        // A change counts only once its link is used, and only before it expires.
+        assert!(
+            store
+                .start_email_change(sam.id, "sam@example.org", "t1", 100, 50)
+                .unwrap()
+        );
+        assert_eq!(store.account(sam.id).unwrap().unwrap().email, None);
+        assert_eq!(store.users_named("sam@example.org").unwrap().len(), 0);
+        assert_eq!(
+            store.confirm_email_change("t1", 150).unwrap(),
+            EmailConfirmed::Invalid
+        );
+        assert!(
+            store
+                .start_email_change(sam.id, "sam@example.org", "t2", 200, 50)
+                .unwrap()
+        );
+        store.create_reset("reset", sam.id, 200, 100).unwrap();
+        assert_eq!(
+            store.confirm_email_change("t2", 210).unwrap(),
+            EmailConfirmed::Changed {
+                user_id: sam.id,
+                email: "sam@example.org".to_owned()
+            }
+        );
+        assert_eq!(
+            store.confirm_email_change("t2", 211).unwrap(),
+            EmailConfirmed::Invalid
+        );
+        // The reset link sent before went elsewhere; it ends.
+        assert_eq!(store.take_reset("reset", 212).unwrap(), None);
+
+        // An address taken while its link waits is not given away twice.
+        assert!(
+            store
+                .start_email_change(sam.id, "new@example.org", "t3", 300, 50)
+                .unwrap()
+        );
+        assert!(
+            store
+                .set_email(admin.id, Some("NEW@example.org"), 301)
+                .unwrap()
+        );
+        assert_eq!(
+            store.confirm_email_change("t3", 302).unwrap(),
+            EmailConfirmed::Taken
+        );
+        assert_eq!(
+            store.account(sam.id).unwrap().unwrap().email.as_deref(),
+            Some("sam@example.org")
+        );
+
+        // An invite whose address an account took meanwhile creates no second one.
+        store
+            .create_invite("inv", "kim@example.org", Role::User, admin.id, 400, 100)
+            .unwrap();
+        assert!(
+            !store
+                .set_email(sam.id, Some("KIM@example.org"), 401)
+                .unwrap()
+        );
+        store
+            .conn()
+            .execute(
+                "UPDATE users SET email = 'Kim@Example.org' WHERE id = ?1",
+                [sam.id],
+            )
+            .unwrap();
+        assert_eq!(
+            store.redeem_invite("inv", "kim", "hash", 402).unwrap(),
+            Redeemed::EmailTaken
         );
     }
 }

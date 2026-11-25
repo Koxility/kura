@@ -4,6 +4,7 @@
 
 mod auth;
 mod downloaded;
+mod emails;
 mod invites;
 mod jellyfin;
 mod library;
@@ -23,6 +24,7 @@ use std::{
 
 use async_trait::async_trait;
 pub use auth::{API_KEY_PREFIX, SESSION_TTL, check_email};
+pub use emails::{EMAIL_TTL, EmailChange};
 pub use invites::{INVITE_TTL, Registered};
 use kura_domain::{
     CalendarDay, Episode, EpisodeId, Genre, HosterLink, Job, JobState, Language, Library,

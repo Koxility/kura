@@ -642,11 +642,33 @@ async fn every_user_changes_their_own_account() {
     let wrong = json!({ "email": "sam@example.org", "password": "wrong horse" });
     let refused = server.call(Method::PUT, "/account/email", &sam, wrong);
     assert_eq!(refused.await.0, 403);
+    // Without a mail server no link can go out, so a new address is refused.
     let email = json!({ "email": "sam@example.org", "password": "correct horse" });
-    let (_, account) = server
+    let (code, _) = server
+        .call(Method::PUT, "/account/email", &sam, email.clone())
+        .await;
+    assert_eq!(code, 503);
+    let (port, mut mails) = fake_mail_server().await;
+    server
+        .call(Method::PUT, "/admin/mail", &admin, plain_mail_server(port))
+        .await;
+    // A new address counts once the link mailed to it is opened.
+    let (code, account) = server
         .call(Method::PUT, "/account/email", &sam, email)
         .await;
+    assert_eq!(code, 200);
+    assert_eq!(account["email"], Value::Null);
+    assert_eq!(account["pending_email"], "sam@example.org");
+    let mail = next_mail(&mut mails).await;
+    assert!(
+        mail.contains("Subject: Kura: confirm your email address"),
+        "{mail}"
+    );
+    let (code, _) = confirm_email(&server, &email_token(&mail)).await;
+    assert_eq!(code, 204);
+    let (_, account) = server.get("/account", &sam).await;
     assert_eq!(account["email"], "sam@example.org");
+    assert_eq!(account["pending_email"], Value::Null);
     let none = json!({ "email": "", "password": "correct horse" });
     let cleared = server.call(Method::PUT, "/account/email", &sam, none);
     assert_eq!(cleared.await.1["email"], Value::Null);
@@ -1273,6 +1295,12 @@ async fn the_mail_password_stays_with_its_server() {
 async fn the_email_prompt_is_shown_once() {
     let server = Server::start().await;
     let admin = server.log_in("/setup", "admin", "correct horse").await;
+    // An email is only of use with a mail server: until then nobody is asked.
+    assert_eq!(server.get("/account", &admin).await.1["ask_email"], false);
+    let (port, mut mails) = fake_mail_server().await;
+    server
+        .call(Method::PUT, "/admin/mail", &admin, plain_mail_server(port))
+        .await;
     // The first admin is asked too.
     assert_eq!(server.get("/account", &admin).await.1["ask_email"], true);
     for name in ["sam", "kim"] {
@@ -1303,9 +1331,14 @@ async fn the_email_prompt_is_shown_once() {
         .await;
     assert_eq!(code, 200);
     assert_eq!(
-        (account["email"].as_str(), &account["ask_email"]),
-        (Some("kim@example.org"), &json!(false))
+        (
+            &account["email"],
+            account["pending_email"].as_str(),
+            &account["ask_email"]
+        ),
+        (&Value::Null, Some("kim@example.org"), &json!(false))
     );
+    assert!(next_mail(&mut mails).await.contains("kim@example.org"));
     // An API key cannot, even of a fresh account.
     let (_, key) = server
         .call(Method::POST, "/account/keys", &kim, json!({ "name": "k" }))
@@ -1321,6 +1354,22 @@ async fn the_email_prompt_is_shown_once() {
     // An account with an email is never asked.
     let lee = server.log_in("/login", "lee", "correct horse").await;
     assert_eq!(server.get("/account", &lee).await.1["ask_email"], false);
+}
+
+fn email_token(mail: &str) -> String {
+    let text = readable(mail);
+    let start = text
+        .find("confirm-email#token=")
+        .expect("a confirmation link")
+        + 20;
+    text[start..start + 64].to_owned()
+}
+
+async fn confirm_email(server: &Server, token: &str) -> (u16, Value) {
+    let form = json!({ "token": token });
+    server
+        .call(Method::POST, "/account/email/confirm", "", form)
+        .await
 }
 
 fn invite_token(mail: &str) -> String {
@@ -1710,4 +1759,119 @@ async fn connection_tests_do_not_read_out_other_services() {
     assert_eq!(code, 502);
     let text = answer["error"].as_str().unwrap();
     assert!(!text.contains("secret") && !text.contains("SSH"), "{text}");
+}
+
+/// Audit finding: any account could set any address, also one another account or an open
+/// invite had, without showing that it reads mail there. Every address now belongs to one
+/// account, whatever its letters' case, and the own address counts once its link is opened.
+#[tokio::test]
+async fn every_email_belongs_to_one_account_in_any_case() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let (port, mut mails) = fake_mail_server().await;
+    server
+        .call(Method::PUT, "/admin/mail", &admin, plain_mail_server(port))
+        .await;
+    let user = |name: &str, email: &str| json!({ "name": name, "password": "correct horse", "role": "user", "email": email });
+    let (code, _) = server
+        .call(
+            Method::POST,
+            "/users",
+            &admin,
+            user("sam", "sam@example.org"),
+        )
+        .await;
+    assert_eq!(code, 200);
+    // An admin cannot give the address to a second account, in no case; nor is that account
+    // made half.
+    let (code, _) = server
+        .call(
+            Method::POST,
+            "/users",
+            &admin,
+            user("lee", "SAM@Example.ORG"),
+        )
+        .await;
+    assert_eq!(code, 409);
+    let (_, users) = server.get("/users", &admin).await;
+    assert_eq!(users.as_array().unwrap().len(), 2);
+    let (_, lee) = server
+        .call(Method::POST, "/users", &admin, user("lee", ""))
+        .await;
+    let lee_id = lee["id"].as_i64().unwrap();
+    let set = |id: i64, email: &str| {
+        let path = format!("/users/{id}/email");
+        let form = json!({ "email": email });
+        let server = &server;
+        let admin = admin.clone();
+        async move { server.call(Method::PUT, &path, &admin, form).await.0 }
+    };
+    assert_eq!(set(lee_id, "Sam@example.org").await, 409);
+
+    // Nor can an account take it for itself, nor an address someone was invited with.
+    let lee = server.log_in("/login", "lee", "correct horse").await;
+    let own = |email: &str| {
+        let form = json!({ "email": email, "password": "correct horse" });
+        let server = &server;
+        let lee = lee.clone();
+        async move { server.call(Method::PUT, "/account/email", &lee, form).await }
+    };
+    assert_eq!(own("sAm@EXAMPLE.org").await.0, 409);
+    let invite = json!({ "email": "kim@example.org" });
+    let (code, _) = server
+        .call(Method::POST, "/users/invite", &admin, invite)
+        .await;
+    assert_eq!(code, 200);
+    let invite_mail = next_mail(&mut mails).await;
+    assert_eq!(own("KIM@example.org").await.0, 409);
+    assert_eq!(set(lee_id, "kim@EXAMPLE.org").await, 409);
+    // Inviting an address an account has is refused, in any case.
+    let taken = json!({ "email": "SAM@example.org" });
+    let (code, _) = server
+        .call(Method::POST, "/users/invite", &admin, taken)
+        .await;
+    assert_eq!(code, 409);
+    // The invite still works for the person invited.
+    let form =
+        json!({ "token": invite_token(&invite_mail), "name": "kim", "password": "correct horse" });
+    assert_eq!(
+        server.call(Method::POST, "/register", "", form).await.0,
+        200
+    );
+
+    // A free address waits for its link; until then reset links do not go there.
+    let (code, account) = own("Lee@Example.org").await;
+    assert_eq!(
+        (code, &account["pending_email"]),
+        (200, &json!("Lee@Example.org"))
+    );
+    let mail = next_mail(&mut mails).await;
+    assert!(mail.contains("Lee@Example.org"), "{mail}");
+    let ask = json!({ "name": "lee@example.org" });
+    server.call(Method::POST, "/password-reset", "", ask).await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(
+        mails.try_recv().is_err(),
+        "a reset link went to an unconfirmed address"
+    );
+    let token = email_token(&mail);
+    assert_eq!(confirm_email(&server, &token).await.0, 204);
+    // Once only.
+    assert_eq!(confirm_email(&server, &token).await.0, 400);
+    assert_eq!(confirm_email(&server, &"0".repeat(64)).await.0, 400);
+    let (_, account) = server.get("/account", &lee).await;
+    assert_eq!(account["email"], "Lee@Example.org");
+    // The account's own address in other case is just rewritten, no link needed.
+    let (code, account) = own("lee@example.org").await;
+    assert_eq!((code, &account["email"]), (200, &json!("lee@example.org")));
+
+    // An address taken while its link waited cannot be confirmed any more.
+    let (code, _) = own("free@example.org").await;
+    assert_eq!(code, 200);
+    let late = email_token(&next_mail(&mut mails).await);
+    let sam_id = users[1]["id"].as_i64().unwrap();
+    assert_eq!(set(sam_id, "FREE@example.org").await, 204);
+    assert_eq!(confirm_email(&server, &late).await.0, 409);
+    let (_, account) = server.get("/account", &lee).await;
+    assert_eq!(account["email"], "lee@example.org");
 }

@@ -858,11 +858,24 @@ function EmailForm({ account, onSaved }: { account: Account; onSaved: (next: Acc
           />
         </label>
       )}
+      {account.pending_email && (
+        <p className={styles.hint} role="status">
+          Waiting for confirmation: open the link sent to {account.pending_email}. Until then,
+          reset links go {account.email ? `to ${account.email}` : "nowhere"}.
+        </p>
+      )}
       <div className={`${ui.actions} ${styles.left}`}>
         <button className={ui.primary} disabled={save.isPending || !changed}>
           Save email
         </button>
-        <Outcome mutation={save} done="Saved. A password reset link goes here." />
+        <Outcome
+          mutation={save}
+          done={
+            save.data?.pending_email
+              ? `Link sent to ${save.data.pending_email}; open it to confirm.`
+              : "Saved."
+          }
+        />
       </div>
     </form>
   );
