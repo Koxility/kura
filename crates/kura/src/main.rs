@@ -68,7 +68,10 @@ async fn serve() -> anyhow::Result<()> {
     let data = PathBuf::from(env::var("KURA_DATA").unwrap_or_else(|_| "data".into()));
     std::fs::create_dir_all(&data)
         .with_context(|| format!("could not create the data folder {}", data.display()))?;
+    keep_private(&data);
     let store = Store::open(&data.join("kura.db")).context("could not open the database")?;
+    // The database exists now, also on the very first start; its folder was closed already.
+    keep_private(&data);
     let proxies = proxy::TrustedProxies::from_env()
         .map_err(|err| anyhow::anyhow!("KURA_TRUSTED_PROXIES: {err}"))?;
     let core = Core::with_defaults(store)?;
@@ -100,6 +103,38 @@ async fn serve() -> anyhow::Result<()> {
         () = stop_signal() => tracing::info!("Kura is stopping"),
     }
     Ok(())
+}
+
+/// The database holds the mail server's password and the Jellyfin API key, which Kura has to
+/// send as they are, so they cannot be stored hashed. The data folder is for Kura's own user
+/// alone: `0700`, and the database files in it `0600`, also when an older Kura or the umask
+/// made them readable for others. A folder Kura does not own is left as it is, with a warning.
+fn keep_private(data: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let close = |path: &std::path::Path, mode: u32| {
+            let Ok(metadata) = std::fs::metadata(path) else {
+                return;
+            };
+            if metadata.permissions().mode() & 0o777 == mode {
+                return;
+            }
+            if let Err(err) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+            {
+                tracing::warn!(
+                    "could not make {} readable only for Kura ({mode:o}): {err}",
+                    path.display()
+                );
+            }
+        };
+        close(data, 0o700);
+        for name in ["kura.db", "kura.db-journal", "kura.db-wal", "kura.db-shm"] {
+            close(&data.join(name), 0o600);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = data;
 }
 
 /// Ctrl+C, or SIGTERM as sent by `docker stop`.

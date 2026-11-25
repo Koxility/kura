@@ -562,7 +562,11 @@ function Jellyfin({ draft, change }: SectionProps) {
           autoComplete="off"
           value={jellyfin.api_key}
           onChange={(event) => set({ api_key: event.target.value })}
-          placeholder="From Jellyfin: Dashboard, API Keys"
+          placeholder={
+            jellyfin.api_key_set
+              ? "Saved; leave empty to keep it"
+              : "From Jellyfin: Dashboard, API Keys"
+          }
         />
       </label>
       <div className={`${ui.actions} ${styles.left}`}>

@@ -1603,3 +1603,75 @@ async fn an_admin_key_cannot_take_over_kura() {
     assert_eq!(with_key(Method::GET, "/queue", Value::Null).await, 200);
     assert_eq!(with_key(Method::GET, "/users", Value::Null).await, 200);
 }
+
+/// A Jellyfin that names itself only to requests that carry `key`.
+async fn fake_jellyfin(key: &'static str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let mut request = vec![0u8; 4096];
+            let read = stream.read(&mut request).await.unwrap_or(0);
+            let request = String::from_utf8_lossy(&request[..read]).into_owned();
+            let answer = if request.contains(key) {
+                let body = r#"{"ServerName":"den","Version":"10.10"}"#;
+                format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+            } else {
+                "HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+                    .to_owned()
+            };
+            let _ = stream.write_all(answer.as_bytes()).await;
+        }
+    });
+    url
+}
+
+/// Audit finding: the settings showed the Jellyfin API key to every admin and every admin's
+/// API key. Like the mail password, it is now only saved, never shown, and kept only for the
+/// server it was entered for.
+#[tokio::test]
+async fn the_jellyfin_key_is_kept_but_never_shown() {
+    let server = Server::start().await;
+    let admin = server.log_in("/setup", "admin", "correct horse").await;
+    let jellyfin = fake_jellyfin("JELLY-KEY-1").await;
+    let folder = tempfile::tempdir().unwrap();
+    let (_, mut settings) = server.get("/settings", &admin).await;
+    settings["libraries"] = json!([{ "name": "Main", "path": folder.path().join("main") }]);
+    settings["jellyfin"] = json!({ "url": jellyfin, "api_key": "JELLY-KEY-1" });
+    let (code, saved) = server
+        .call(Method::PUT, "/settings", &admin, settings.clone())
+        .await;
+    assert_eq!(code, 200);
+    assert!(!saved.to_string().contains("JELLY-KEY-1"), "{saved}");
+    let (_, shown) = server.get("/settings", &admin).await;
+    assert!(!shown.to_string().contains("JELLY-KEY-1"), "{shown}");
+    assert_eq!(shown["jellyfin"]["api_key"], "");
+    assert_eq!(shown["jellyfin"]["api_key_set"], true);
+
+    // Saving what the browser got back, with the empty key, keeps the key; testing uses it.
+    let (code, _) = server
+        .call(Method::PUT, "/settings", &admin, shown.clone())
+        .await;
+    assert_eq!(code, 200);
+    let test = json!({ "url": format!("{jellyfin}/"), "api_key": "" });
+    let (code, answer) = server
+        .call(Method::POST, "/admin/jellyfin/test", &admin, test)
+        .await;
+    assert_eq!((code, &answer["server"]), (200, &json!("den 10.10")));
+
+    // Another address does not get the stored key, neither to test nor to keep.
+    let elsewhere = fake_jellyfin("JELLY-KEY-1").await;
+    let test = json!({ "url": elsewhere, "api_key": "" });
+    let (code, _) = server
+        .call(Method::POST, "/admin/jellyfin/test", &admin, test)
+        .await;
+    assert_eq!(code, 400);
+    let mut moved = shown.clone();
+    moved["jellyfin"]["url"] = json!(elsewhere);
+    let (code, _) = server.call(Method::PUT, "/settings", &admin, moved).await;
+    assert_eq!(code, 400);
+}

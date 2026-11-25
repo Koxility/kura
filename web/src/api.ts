@@ -175,7 +175,10 @@ export interface Library {
 /** Off while `url` is empty. */
 export interface Jellyfin {
   url: string;
+  /** Never sent by the server; empty keeps the saved key for the same address. */
   api_key: string;
+  /** Whether a key is saved. Only in answers from the server. */
+  api_key_set?: boolean;
 }
 
 export type Schedule = { kind: "every"; minutes: number } | { kind: "daily"; at: string };

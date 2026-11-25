@@ -80,6 +80,9 @@ impl Core {
 
     /// Checks that Jellyfin answers with these settings; returns its name and version.
     pub async fn test_jellyfin(&self, jellyfin: &Jellyfin) -> Result<String> {
+        let mut jellyfin = jellyfin.clone();
+        self.keep_jellyfin_key(&mut jellyfin)?;
+        let jellyfin = &jellyfin;
         check(jellyfin)?;
         let answer = client()?
             .get(format!("{}/System/Info", base(jellyfin)))
@@ -96,6 +99,20 @@ impl Core {
         Ok(format!("{} {}", info.server_name, info.version)
             .trim()
             .to_owned())
+    }
+
+    /// The browser never gets the stored API key, so it sends an empty one to mean "keep it".
+    /// That only holds for the very same server: otherwise the stored key would go to whatever
+    /// address is entered, and an admin, or a key that got out, could read it that way.
+    pub(crate) fn keep_jellyfin_key(&self, jellyfin: &mut Jellyfin) -> Result<()> {
+        if !jellyfin.api_key.trim().is_empty() || !jellyfin.enabled() {
+            return Ok(());
+        }
+        let stored = self.store.settings()?.jellyfin;
+        if stored.enabled() && same_server(&stored.url, &jellyfin.url) {
+            jellyfin.api_key = stored.api_key;
+        }
+        Ok(())
     }
 
     fn pending_scan(&self) -> std::sync::MutexGuard<'_, Pending> {
@@ -122,6 +139,12 @@ pub(crate) fn check(jellyfin: &Jellyfin) -> Result<()> {
         return Err(CoreError::Invalid("Jellyfin needs an API key"));
     }
     Ok(())
+}
+
+/// Whether two Jellyfin addresses name the same server, as people type them.
+fn same_server(a: &str, b: &str) -> bool {
+    let plain = |url: &str| url.trim().trim_end_matches('/').to_ascii_lowercase();
+    plain(a) == plain(b)
 }
 
 /// The folder as Jellyfin sees it: the library's Jellyfin path in place of its own, when the

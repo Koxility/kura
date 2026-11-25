@@ -1218,21 +1218,28 @@ async fn events(State(core): App, _: Session) -> impl IntoResponse {
 
 // Settings
 
-/// The settings, plus the naming template that applies while they name none.
-async fn settings(State(core): App, _: Admin) -> ApiResult<Json<Value>> {
-    let mut settings = serde_json::to_value(core.settings()?)
+/// The settings as the browser sees them: the Jellyfin API key only as whether one is
+/// saved, like the mail password; plus the naming template that applies while they name none.
+fn settings_view(settings: &Settings) -> ApiResult<Value> {
+    let mut view = serde_json::to_value(settings)
         .map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))?;
-    settings["naming_template_default"] = json!(kura_core::default_template());
-    Ok(Json(settings))
+    view["jellyfin"]["api_key"] = json!("");
+    view["jellyfin"]["api_key_set"] = json!(!settings.jellyfin.api_key.trim().is_empty());
+    view["naming_template_default"] = json!(kura_core::default_template());
+    Ok(view)
 }
 
+async fn settings(State(core): App, _: Admin) -> ApiResult<Json<Value>> {
+    Ok(Json(settings_view(&core.settings()?)?))
+}
+
+/// An empty Jellyfin `api_key` keeps the stored one, for the same server.
 async fn save_settings(
     State(core): App,
     _: BrowserAdmin,
     Json(settings): Json<Settings>,
-) -> ApiResult<Json<Settings>> {
-    core.save_settings(&settings)?;
-    Ok(Json(settings))
+) -> ApiResult<Json<Value>> {
+    Ok(Json(settings_view(&core.save_settings(&settings)?)?))
 }
 
 #[derive(Deserialize)]

@@ -8,6 +8,8 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 - **An admin's API key can no longer take over Kura.** Creating or deleting accounts, sending or revoking invites, changing the mail server (and its test mail) and saving the settings now need a login with the password, like setting someone's password already did. Before, a key that got out could create a second admin, log in as it and lock the owner out, or point every reset link at another website. Programs keep everything else: queue, requests, browsing and reading.
 - **The brake on reset requests and invite links counts per name, not per network.** Five reset requests for one name now hold up only requests for that name, and tries at an invite link only that link. Before, anyone could block password resets and sign-ups for everyone on the same address, which behind a reverse proxy without `KURA_TRUSTED_PROXIES` is everyone. A made-up invite link is now refused before any password is hashed. The log's hint about an untrusted proxy comes back every hour and says what it means for logins and resets.
+- **The data folder is for Kura alone.** It is made `0700`, and the database `0600`, also on existing installations at the next start (a warning in the log if that is not possible). The database keeps the mail password and the Jellyfin API key as they are, since Kura has to send them.
+- **The Jellyfin API key is no longer shown**, like the mail password: the settings, also the exported configuration, only say that one is saved. An empty field keeps it, but only for the same Jellyfin address.
 
 ## [1.5.1] - 2026-11-23
 

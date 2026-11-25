@@ -447,7 +447,12 @@ impl Core {
         })
     }
 
-    pub fn save_settings(&self, settings: &Settings) -> Result<()> {
+    /// Saves the settings and returns them as saved. An empty Jellyfin key keeps the stored
+    /// one, so the browser never needs to know it (see [`Core::keep_jellyfin_key`]).
+    pub fn save_settings(&self, settings: &Settings) -> Result<Settings> {
+        let mut settings = settings.clone();
+        self.keep_jellyfin_key(&mut settings.jellyfin)?;
+        let settings = &settings;
         check_settings(settings)?;
         // A typo in a path shows now, not at the first download.
         for library in &settings.libraries {
@@ -459,7 +464,7 @@ impl Core {
         // The number of parallel downloads may have gone up, the sync schedule may differ.
         self.wake.notify_one();
         self.sync_wake.notify_one();
-        Ok(())
+        Ok(settings.clone())
     }
 
     /// Adds a title to the ones Auto-Sync leaves alone, or takes it off that list.

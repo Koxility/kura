@@ -78,7 +78,7 @@ New episodes are queued in the language of the newest episode already downloaded
 ## Settings → Jellyfin
 
 - **Address**: e.g. `http://192.168.1.10:8096`. Empty switches this off.
-- **API key**: created in Jellyfin under *Dashboard → API Keys*.
+- **API key**: created in Jellyfin under *Dashboard → API Keys*. Once saved, Kura never shows it again, also not in the exported configuration; leave the field empty to keep it. It is kept only while the address stays the same, so a new address needs the key again.
 - **Test connection** checks both before you save.
 
 When the queue is empty (nothing queued, nothing downloading), Kura asks Jellyfin once to scan the series folders that got new episodes: a finished season, a batch from Auto-Sync or a single episode. Only those folders are scanned, never the whole library, and several downloads in a row cause one scan, not one each. A failed download stays in the queue and does not hold the scan back. If Jellyfin mounts a library under another path, set **Path in Jellyfin** for that library under *Settings → Library*.
