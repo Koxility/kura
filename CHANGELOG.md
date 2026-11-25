@@ -4,6 +4,10 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-11-25
+
+A security release from an audit of mail, password reset, invites and the database. Updating is recommended for every installation.
+
 ### Security
 
 - **An admin's API key can no longer take over Kura.** Creating or deleting accounts, sending or revoking invites, changing the mail server (and its test mail) and saving the settings now need a login with the password, like setting someone's password already did. Before, a key that got out could create a second admin, log in as it and lock the owner out, or point every reset link at another website. Programs keep everything else: queue, requests, browsing and reading.
@@ -349,7 +353,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.5.2...HEAD
+[1.5.2]: https://github.com/Koxility/kura/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/Koxility/kura/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/Koxility/kura/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/Koxility/kura/compare/v1.3.5...v1.4.0

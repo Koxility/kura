@@ -134,7 +134,7 @@ CREATE TABLE invites (
 );
 ";
 
-/// Added after 1.5.1: a new email address waits here until the link mailed to it is opened.
+/// Added in 1.5.2: a new email address waits here until the link mailed to it is opened.
 /// Only the SHA-256 of the link's token is kept; one change per account at a time.
 const EMAIL_CHANGES: &str = "
 CREATE TABLE email_changes (
