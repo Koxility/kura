@@ -1315,6 +1315,43 @@ mod tests {
     }
 
     #[test]
+    fn auto_sync_results_and_replaced_files_survive_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kura.db");
+        let store = Store::open(&path).unwrap();
+        let user = store.create_user("admin", "hash", Role::Admin).unwrap();
+        let old = ["/media/Frieren/Season 01/Frieren S01E001 German Sub.mkv".to_owned()];
+        let first = episode(1);
+        let upgrade = NewJob {
+            replaces: &old,
+            ..new_job(&first, user.unwrap().id)
+        };
+        store.enqueue(&upgrade).unwrap().unwrap();
+        assert_eq!(store.last_sync_run().unwrap(), None);
+        store.set_last_sync_run(500).unwrap();
+        store
+            .save_sync_result(SiteId::AniWorld, "frieren", "{\"a\":1}")
+            .unwrap();
+        store
+            .save_sync_result(SiteId::AniWorld, "frieren", "{\"a\":2}")
+            .unwrap();
+        drop(store);
+
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.jobs().unwrap()[0].replaces, old);
+        assert_eq!(store.last_sync_run().unwrap(), Some(500));
+        let saved = store.sync_results().unwrap();
+        assert_eq!(
+            saved,
+            [(
+                SiteId::AniWorld,
+                "frieren".to_owned(),
+                "{\"a\":2}".to_owned()
+            )]
+        );
+    }
+
+    #[test]
     fn settings_and_users_survive_a_restart() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("kura.db");

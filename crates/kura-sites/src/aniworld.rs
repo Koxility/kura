@@ -345,13 +345,27 @@ fn parse_episodes(season: u32, html: &str) -> Vec<Episode> {
                 title: first_text(row, ".seasonEpisodeTitle strong")
                     .or_else(|| first_text(row, ".seasonEpisodeTitle span"))
                     .unwrap_or_default(),
-                languages: row
-                    .select(&sel("img.flag[src]"))
-                    .filter_map(|flag| flag_language(flag.value().attr("src")?))
-                    .collect(),
+                languages: row_languages(row),
             })
         })
         .collect()
+}
+
+/// The flags of a season table row. Lazily loaded ones carry the real address in `data-src`
+/// and a placeholder in `src`; each language counts once, also when a `<noscript>` copy
+/// repeats it.
+fn row_languages(row: scraper::ElementRef) -> Vec<Language> {
+    let mut languages = Vec::new();
+    for flag in row.select(&sel("img.flag")) {
+        let flag = flag.value();
+        let src = flag.attr("data-src").or_else(|| flag.attr("src"));
+        if let Some(language) = src.and_then(flag_language)
+            && !languages.contains(&language)
+        {
+            languages.push(language);
+        }
+    }
+    languages
 }
 
 fn flag_language(src: &str) -> Option<Language> {
@@ -638,6 +652,13 @@ mod tests {
                     number: 2,
                     title: "Rain on the Pass".into(),
                     languages: vec![Language::GermanSub],
+                },
+                // Flags that load lazily.
+                Episode {
+                    season: 1,
+                    number: 3,
+                    title: "Die Brücke".into(),
+                    languages: vec![Language::GermanDub, Language::GermanSub],
                 },
             ]
         );
