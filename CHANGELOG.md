@@ -4,10 +4,6 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
-### Changed
-
-- **The Auto-Sync page has room again.** Each tracked title is a card: its name with small chips under it for the language (with its flag), the episodes on disk and the newest episode on the site, and its state on the right (queued, waiting, check failed, nothing new) with a coloured dot. A click opens the site, the last check with its time, the episodes waiting for the language one per line, and *Open title* and *Remove*. Cards with a failed check or waiting episodes start open.
-
 ## [1.5.3] - 2026-11-27
 
 Auto-Sync, reworked after it missed a newly released episode. It now decides about every listed episode by what is on disk in the series' language, and its page shows what is really there.
@@ -24,7 +20,7 @@ Auto-Sync, reworked after it missed a newly released episode. It now decides abo
 ### Changed
 
 - **Auto-Sync replaces an episode once its better language is out**, e.g. German Dub for a series that follows the dub while that episode is only on disk as German Sub. When the new download is done, the old file is deleted with its `.nfo` and thumbnail, before Jellyfin is asked to scan.
-- **The Auto-Sync page shows what is really there.** The number next to a title counted finished downloads, also deleted ones and ones in other languages (19 for a series with 16 episodes on disk). Each title now shows its language, the episodes on disk in it and the newest of them, the newest episode the site lists, what the last check queued or tried again, and which episodes wait for the language and which languages they are offered in. A failed check stands out.
+- **The Auto-Sync page shows what is really there, with room to read it.** The number next to a title counted finished downloads, also deleted ones and ones in other languages (19 for a series with 16 episodes on disk). Each title is now a card: its name, with small chips under it for its language (with flag), the episodes on disk in that language and the newest of them, and the newest episode the site lists; its state on the right with a coloured dot (queued, waiting, check failed, nothing new). A click opens the site, the last check with its time, the episodes waiting for the language and which languages they are offered in, and *Open title* and *Remove*. Cards with a failed check or waiting episodes start open.
 - The results of the last checks and the time of the last run are kept over a restart, so the next scheduled run follows the last one instead of starting at once.
 - *Sync now* while a check is running waits for that check instead of starting a second one.
 
