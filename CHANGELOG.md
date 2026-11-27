@@ -4,6 +4,22 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Fixed
+
+- **Auto-Sync no longer misses an episode because of an earlier download in another language.** Any download on record counted as "already there", whatever its language and whether its file was still on disk. So once an episode had been downloaded in German Sub and that file was gone, its German Dub was never queued, neither on schedule nor with *Sync now*. Now an episode counts as downloaded only while a file of it is in the library in the series' language (or in a file whose name tells none).
+- **A series keeps its language.** Auto-Sync followed the language of the newest file on disk, so one episode in another language could switch a series over. It now follows the best language the series has, by the order under *Settings → Downloads*.
+- **Failed downloads from Auto-Sync are tried again** on every check, instead of blocking their episode for good. Cancelled downloads stay cancelled.
+- **Watching and deleting no longer stops a series.** With every file of a series deleted, Auto-Sync did nothing and said "Nothing new". It now goes on from the newest episode downloaded, and still never downloads a deleted episode again.
+- **A season page Kura cannot read is a failed check**, not "Nothing new", and is asked for once more first. One season that fails no longer stops the check of the others.
+- AniWorld flags that load lazily are read in season lists too, so no episode is listed without its languages.
+
+### Changed
+
+- **Auto-Sync replaces an episode once its better language is out**, e.g. German Dub for a series that follows the dub while that episode is only on disk as German Sub. When the new download is done, the old file is deleted with its `.nfo` and thumbnail, before Jellyfin is asked to scan.
+- **The Auto-Sync page shows what is really there.** The number next to a title counted finished downloads, also deleted ones and ones in other languages (19 for a series with 16 episodes on disk). Each title now shows its language, the episodes on disk in it and the newest of them, the newest episode the site lists, what the last check queued or tried again, and which episodes wait for the language and which languages they are offered in. A failed check stands out.
+- The results of the last checks and the time of the last run are kept over a restart, so the next scheduled run follows the last one instead of starting at once.
+- *Sync now* while a check is running waits for that check instead of starting a second one.
+
 ## [1.5.2] - 2026-11-25
 
 A security release from an audit of mail, password reset, invites and the database. Updating is recommended for every installation.
