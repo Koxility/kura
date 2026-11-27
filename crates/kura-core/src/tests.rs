@@ -5,8 +5,12 @@ use kura_hosters::HosterError;
 
 use super::*;
 
-/// One series with three episodes; every episode has the same links.
-struct FakeSite(Vec<HosterLink>);
+/// One series with three episodes; every episode has the same links. A series whose seasons
+/// are in the listing shows those instead, so a test can change what the site offers.
+struct FakeSite(Vec<HosterLink>, Listing);
+
+/// Episodes per `(slug, season)`, for series a test lists itself.
+type Listing = Arc<Mutex<HashMap<(String, u32), Vec<Episode>>>>;
 
 #[async_trait]
 impl Site for FakeSite {
@@ -51,7 +55,16 @@ impl Site for FakeSite {
                 cover_url: None,
             },
             description: String::new(),
-            seasons: vec![1],
+            seasons: {
+                let listing = self.1.lock().unwrap();
+                let mut seasons: Vec<u32> = listing
+                    .keys()
+                    .filter(|(listed, _)| listed == slug)
+                    .map(|(_, season)| *season)
+                    .collect();
+                seasons.sort_unstable();
+                if seasons.is_empty() { vec![1] } else { seasons }
+            },
             // One fake series has an ID on the site, the other has none.
             imdb_id: (slug == "lantern-road").then(|| "tt0388629".to_owned()),
         })
@@ -59,6 +72,9 @@ impl Site for FakeSite {
 
     async fn episodes(&self, slug: &str, season: u32) -> kura_sites::Result<Vec<Episode>> {
         use Language::{GermanDub, GermanSub};
+        if let Some(listed) = self.1.lock().unwrap().get(&(slug.to_owned(), season)) {
+            return Ok(listed.clone());
+        }
         // `mixed` offers its episodes in different languages; every other series in dub.
         let languages = |number| match (slug, number) {
             ("mixed", 2) => vec![GermanDub, GermanSub],
@@ -201,6 +217,8 @@ fn link(language: Language, hoster: &str, url: &str) -> HosterLink {
 struct Setup {
     core: Arc<Core>,
     downloads: Arc<Mutex<Vec<(String, PathBuf)>>>,
+    /// What the fake site lists for series a test sets up itself.
+    listing: Listing,
     user: i64,
     /// Holds the library folders; removed when the test ends.
     dir: tempfile::TempDir,
@@ -239,9 +257,13 @@ fn setup(links: Vec<HosterLink>, parallel: u8) -> Setup {
 
     let downloader = FakeDownload::default();
     let downloads = downloader.0.clone();
+    let listing = Listing::default();
     let core = Core::new(
         store,
-        vec![Arc::new(FakeSite(links)), Arc::new(FailingSite)],
+        vec![
+            Arc::new(FakeSite(links, listing.clone())),
+            Arc::new(FailingSite),
+        ],
         vec![
             Box::new(FakeHoster("voe", Default::default())),
             Box::new(FakeHoster("vidmoly", Default::default())),
@@ -252,6 +274,7 @@ fn setup(links: Vec<HosterLink>, parallel: u8) -> Setup {
     Setup {
         core,
         downloads,
+        listing,
         user: user.unwrap().id,
         dir,
     }
@@ -742,6 +765,7 @@ fn titles_become_safe_folder_names() {
         queued_at: 0,
         imdb_id: imdb_id.map(str::to_owned),
         started_at: None,
+        replaces: Vec::new(),
     };
     let path = |imdb| {
         let template = "{title} {episodenumber}";
@@ -897,8 +921,14 @@ async fn auto_sync_queues_what_is_new_and_fills_gaps_only_when_asked() {
 
     let status = s.core.sync_status().unwrap();
     assert_eq!(status.titles.len(), 1);
-    assert_eq!(status.titles[0].downloaded, 2);
-    assert_eq!(status.titles[0].result.as_deref(), Some("Nothing new"));
+    assert_eq!(status.titles[0].on_disk, 2);
+    assert_eq!(
+        status.titles[0]
+            .check
+            .as_ref()
+            .map(|check| check.summary.as_str()),
+        Some("Nothing new")
+    );
 
     let mut settings = s.core.settings().unwrap();
     settings.auto_sync.only_new = false;
@@ -1132,6 +1162,8 @@ async fn downloaded_titles_and_episodes_are_found_by_database_id_and_name() {
 #[tokio::test]
 async fn deleted_files_are_no_longer_downloaded() {
     let s = setup(vec![link(Language::GermanDub, "voe", "https://voe/x")], 1);
+    // Only the episode the test is about, so Auto-Sync finds nothing new after it.
+    s.list("lantern-road", 1, &[(1, &[DUB])]);
     s.queue(first(), Choices::default()).await.unwrap();
     let jobs = states(&s.core, &[JobState::Done]).await;
     // A series only found by its IMDb ID on its page.
@@ -1248,6 +1280,8 @@ async fn requests_and_selections_have_limits() {
 #[tokio::test]
 async fn an_episode_whose_file_was_deleted_can_be_downloaded_again() {
     let s = setup(vec![link(Language::GermanDub, "voe", "https://voe/x")], 1);
+    // Only the episode the test is about, so Auto-Sync finds nothing new after it.
+    s.list("lantern-road", 1, &[(1, &[DUB])]);
     s.queue(first(), Choices::default()).await.unwrap();
     let jobs = states(&s.core, &[JobState::Done]).await;
     let file = PathBuf::from(jobs[0].path.as_deref().unwrap());
@@ -1391,6 +1425,7 @@ async fn jellyfin_scans_the_new_series_folders_once_the_queue_is_empty() {
             imdb_id: Some("none"),
             now: 0,
             replace_done: false,
+            replaces: &[],
         })
         .unwrap();
     let both = Selection::Picked {
@@ -1523,4 +1558,190 @@ async fn a_theme_picks_from_its_own_list_and_known_songs() {
     assert!(bad(|theme| theme.ascii_library.push("../x".into())));
     assert!(bad(|theme| theme.volume = 101));
     assert!(bad(|theme| theme.song = Some("missing".into())));
+}
+
+impl Setup {
+    /// Makes the fake site list these episodes, each with its languages, for one season.
+    fn list(&self, slug: &str, season: u32, episodes: &[(u32, &[Language])]) {
+        let episodes = episodes
+            .iter()
+            .map(|(number, languages)| Episode {
+                season,
+                number: *number,
+                title: format!("Episode {number}"),
+                languages: languages.to_vec(),
+            })
+            .collect();
+        let mut listing = self.listing.lock().unwrap();
+        listing.insert((slug.to_owned(), season), episodes);
+    }
+
+    /// Queues single episodes of a series in one language, as the test user.
+    async fn queue_in(&self, slug: &str, episodes: &[(u32, u32)], language: Language) {
+        let selection = Selection::Picked {
+            seasons: Vec::new(),
+            episodes: episodes.to_vec(),
+        };
+        let choices = Choices {
+            language: Some(language),
+            ..Choices::default()
+        };
+        let queued = self
+            .core
+            .enqueue(SiteId::AniWorld, slug, selection, &choices, self.user);
+        queued.await.unwrap();
+    }
+
+    fn tracked(&self, slug: &str) -> TrackedTitle {
+        let status = self.core.sync_status().unwrap();
+        let title = status
+            .titles
+            .into_iter()
+            .find(|title| title.title.slug == slug);
+        title.unwrap()
+    }
+}
+
+const DUB: Language = Language::GermanDub;
+const SUB: Language = Language::GermanSub;
+
+/// The Detective Is Already Dead: S02E05 came out in German dub, but Auto-Sync never queued it.
+/// An earlier download of that episode had finished in another language and its file was gone,
+/// and every download on record counted as "already there", whatever its language.
+#[tokio::test]
+async fn a_dub_episode_is_queued_although_a_download_in_another_language_is_on_record() {
+    let links = vec![
+        link(DUB, "voe", "https://voe/dub"),
+        link(SUB, "voe", "https://voe/sub"),
+    ];
+    let s = setup(links, 1);
+    s.list(
+        "detective",
+        1,
+        &[(1, &[DUB, SUB]), (2, &[DUB, SUB]), (3, &[SUB])],
+    );
+    s.queue_in("detective", &[(1, 1), (1, 2)], DUB).await;
+    s.queue_in("detective", &[(1, 3)], SUB).await;
+    let jobs = states(&s.core, &[JobState::Done; 3]).await;
+    std::fs::remove_file(jobs[2].path.as_deref().unwrap()).unwrap();
+
+    // Only the sub is out: nothing to do yet, and the page says what it waits for.
+    assert_eq!(s.core.sync_once().await.unwrap(), 0);
+    let title = s.tracked("detective");
+    assert_eq!(title.language, Some(DUB));
+    assert_eq!(title.on_disk, 2);
+    assert_eq!(title.newest_on_disk, Some((1, 2)));
+    let check = title.check.unwrap();
+    assert_eq!(check.newest_listed, Some((1, 3)));
+    assert_eq!(check.waiting.len(), 1);
+    assert_eq!(check.waiting[0].episode, (1, 3));
+    assert_eq!(check.waiting[0].offered, [SUB]);
+
+    // The dub is out now.
+    s.list(
+        "detective",
+        1,
+        &[(1, &[DUB, SUB]), (2, &[DUB, SUB]), (3, &[DUB, SUB])],
+    );
+    assert_eq!(s.core.sync_once().await.unwrap(), 1);
+    let jobs = states(&s.core, &[JobState::Done; 3]).await;
+    assert_eq!(jobs[2].language, Some(DUB));
+    assert!(jobs[2].path.as_deref().unwrap().ends_with("German Dub.mkv"));
+    let title = s.tracked("detective");
+    assert_eq!(title.on_disk, 3);
+    assert_eq!(title.check.unwrap().queued, [(1, 3)]);
+    assert_eq!(s.core.sync_once().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn a_failed_download_is_tried_again_on_every_run() {
+    let s = setup(vec![link(DUB, "voe", "https://voe/dub")], 1);
+    s.queue_in("lantern-road", &[(1, 1)], DUB).await;
+    // No sub links: this one fails.
+    s.queue_in("lantern-road", &[(1, 2)], SUB).await;
+    states(&s.core, &[JobState::Done, JobState::Failed]).await;
+
+    // Episode 2 is tried again, in the title's language, and episode 3 is new.
+    assert_eq!(s.core.sync_once().await.unwrap(), 2);
+    let jobs = states(&s.core, &[JobState::Done; 3]).await;
+    assert_eq!(jobs[1].language, Some(DUB));
+}
+
+#[tokio::test]
+async fn a_download_that_keeps_failing_is_queued_on_every_run() {
+    let s = setup(vec![link(DUB, "voe", "https://voe/broken")], 1);
+    s.list("detective", 1, &[(1, &[DUB]), (2, &[DUB])]);
+    s.queue_in("detective", &[(1, 1)], DUB).await;
+    states(&s.core, &[JobState::Failed]).await;
+    // Nothing finished yet, so episode 2 is not new; episode 1 is tried again each time.
+    for _ in 0..2 {
+        assert_eq!(s.core.sync_once().await.unwrap(), 1);
+        states(&s.core, &[JobState::Failed]).await;
+    }
+}
+
+#[tokio::test]
+async fn a_sub_episode_is_replaced_once_its_dub_is_out() {
+    let links = vec![
+        link(DUB, "voe", "https://voe/dub"),
+        link(SUB, "voe", "https://voe/sub"),
+    ];
+    let s = setup(links, 1);
+    s.list("detective", 1, &[(1, &[DUB, SUB]), (2, &[SUB])]);
+    s.queue_in("detective", &[(1, 1)], DUB).await;
+    s.queue_in("detective", &[(1, 2)], SUB).await;
+    let jobs = states(&s.core, &[JobState::Done; 2]).await;
+    let sub = PathBuf::from(jobs[1].path.as_deref().unwrap());
+    let beside = |end: &str| {
+        let stem = sub.file_stem().unwrap().to_string_lossy();
+        sub.with_file_name(format!("{stem}{end}"))
+    };
+    for end in [".nfo", "-thumb.jpg"] {
+        std::fs::write(beside(end), b"x").unwrap();
+    }
+
+    // The settings rank dub first: the title follows the dub, and the sub stays for now.
+    assert_eq!(s.core.sync_once().await.unwrap(), 0);
+    assert_eq!(s.tracked("detective").language, Some(DUB));
+    assert!(sub.is_file());
+
+    s.list("detective", 1, &[(1, &[DUB, SUB]), (2, &[DUB, SUB])]);
+    assert_eq!(s.core.sync_once().await.unwrap(), 1);
+    let jobs = states(&s.core, &[JobState::Done; 2]).await;
+    assert_eq!(jobs[1].language, Some(DUB));
+    let dub = PathBuf::from(jobs[1].path.as_deref().unwrap());
+    assert!(dub.is_file());
+    assert_ne!(dub, sub);
+    // The sub, its NFO and its thumbnail are gone, so Jellyfin reads the episode afresh.
+    assert!(!sub.exists());
+    assert!(!beside(".nfo").exists());
+    assert!(!beside("-thumb.jpg").exists());
+    assert_eq!(s.core.sync_once().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn a_season_page_without_episodes_is_a_failed_check() {
+    let s = setup(vec![link(DUB, "voe", "https://voe/dub")], 1);
+    s.list("detective", 1, &[(1, &[DUB])]);
+    s.queue_in("detective", &[(1, 1)], DUB).await;
+    states(&s.core, &[JobState::Done]).await;
+    s.list("detective", 1, &[]);
+    assert_eq!(s.core.sync_once().await.unwrap(), 0);
+    let check = s.tracked("detective").check.unwrap();
+    let error = check.error.unwrap();
+    assert!(error.contains("no episodes"), "{error}");
+}
+
+/// Watched and deleted: the title still follows its download history, and what was deleted
+/// stays deleted.
+#[tokio::test]
+async fn new_episodes_come_after_the_newest_download_also_once_its_file_is_deleted() {
+    let s = setup(vec![link(DUB, "voe", "https://voe/dub")], 1);
+    s.queue_in("lantern-road", &[(1, 1)], DUB).await;
+    let jobs = states(&s.core, &[JobState::Done]).await;
+    std::fs::remove_file(jobs[0].path.as_deref().unwrap()).unwrap();
+    assert_eq!(s.core.sync_once().await.unwrap(), 2);
+    let jobs = states(&s.core, &[JobState::Done; 3]).await;
+    assert!(!PathBuf::from(jobs[0].path.as_deref().unwrap()).exists());
+    assert_eq!(s.tracked("lantern-road").on_disk, 2);
 }

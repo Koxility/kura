@@ -10,7 +10,7 @@ use std::{
 
 use kura_domain::{
     Account, ApiKey, EpisodeId, Invite, Job, Language, Mail, Picked, Request, RequestState, Role,
-    Settings, Theme, User, UserEntry,
+    Settings, SiteId, Theme, User, UserEntry,
 };
 use rusqlite::{Connection, OptionalExtension, Row, functions::FunctionFlags, params, types::Type};
 use rusqlite_migration::{M, Migrations};
@@ -145,6 +145,22 @@ CREATE TABLE email_changes (
 );
 ";
 
+/// 1.5.3: the files an Auto-Sync download replaces once it is done, and what the last
+/// Auto-Sync check of each title found, kept over a restart.
+const AUTO_SYNC_STATE: &str = "
+ALTER TABLE jobs ADD COLUMN replaces TEXT;
+CREATE TABLE sync_titles (
+    site   TEXT NOT NULL,
+    slug   TEXT NOT NULL,
+    result TEXT NOT NULL,
+    PRIMARY KEY (site, slug)
+);
+CREATE TABLE sync_runs (
+    id       INTEGER PRIMARY KEY CHECK (id = 1),
+    last_run INTEGER NOT NULL
+);
+";
+
 /// What became of an invite link that someone used to create an account.
 #[derive(Debug, PartialEq)]
 pub enum Redeemed {
@@ -169,7 +185,7 @@ pub enum EmailConfirmed {
 }
 
 const JOB_COLUMNS: &str = "id, site, slug, season, episode, series_title, state, progress, error, path, \
-     language, hoster, dir, hidden, queued_at, imdb_id, started_at";
+     language, hoster, dir, hidden, queued_at, imdb_id, started_at, replaces";
 
 const REQUEST_COLUMNS: &str = "r.id, r.user_id, u.name, r.site, r.slug, r.series_title, r.picked, \
      r.language, r.hoster, r.imdb_id, r.state, r.created_at";
@@ -204,9 +220,12 @@ pub struct NewJob<'a> {
     pub imdb_id: Option<&'a str>,
     /// Unix seconds.
     pub now: i64,
-    /// Also queue it again when it is done, because its file is gone. Never for Auto-Sync:
-    /// an episode someone deleted stays deleted.
+    /// Also queue it again when it is done: its file is gone, or Auto-Sync found it in
+    /// another language than the one it follows. Auto-Sync never asks for an episode whose
+    /// file someone deleted.
     pub replace_done: bool,
+    /// Files this download replaces: deleted once it is done. Empty for most.
+    pub replaces: &'a [String],
 }
 
 pub struct Store {
@@ -245,6 +264,7 @@ impl Store {
             M::up(EMAIL_ASKED),
             M::up(INVITES),
             M::up(EMAIL_CHANGES),
+            M::up(AUTO_SYNC_STATE),
         ])
         .to_latest(&mut conn)?;
         Ok(Self {
@@ -834,13 +854,14 @@ impl Store {
             .conn()
             .query_row(
                 "INSERT INTO jobs (site, slug, season, episode, series_title, user_id,
-                                   language, hoster, dir, queued_at, imdb_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                                   language, hoster, dir, queued_at, imdb_id, replaces)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?13)
                  ON CONFLICT (site, slug, season, episode) DO UPDATE
                      SET state = 'queued', progress = 0, error = NULL, hidden = 0,
                          user_id = excluded.user_id, language = excluded.language,
                          hoster = excluded.hoster, dir = excluded.dir,
-                         queued_at = excluded.queued_at, imdb_id = excluded.imdb_id
+                         queued_at = excluded.queued_at, imdb_id = excluded.imdb_id,
+                         replaces = excluded.replaces
                      WHERE state IN ('failed', 'cancelled') OR (?12 AND state = 'done')
                  RETURNING id",
                 params![
@@ -855,7 +876,10 @@ impl Store {
                     new.dir,
                     new.now,
                     new.imdb_id,
-                    new.replace_done
+                    new.replace_done,
+                    (!new.replaces.is_empty())
+                        .then(|| serde_json::to_string(new.replaces))
+                        .transpose()?
                 ],
                 |row| row.get(0),
             )
@@ -949,6 +973,45 @@ impl Store {
             [id],
         )?;
         Ok(())
+    }
+
+    // Auto-Sync
+
+    /// Keeps what the last Auto-Sync check of a title found, as JSON.
+    pub fn save_sync_result(&self, site: SiteId, slug: &str, result: &str) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO sync_titles (site, slug, result) VALUES (?1, ?2, ?3)
+             ON CONFLICT (site, slug) DO UPDATE SET result = excluded.result",
+            params![site.as_str(), slug, result],
+        )?;
+        Ok(())
+    }
+
+    /// What the last Auto-Sync check of each title found, as saved.
+    pub fn sync_results(&self) -> Result<Vec<(SiteId, String, String)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT site, slug, result FROM sync_titles")?;
+        let rows = stmt.query_map([], |row| Ok((text(row, 0)?, row.get(1)?, row.get(2)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn set_last_sync_run(&self, at: i64) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO sync_runs (id, last_run) VALUES (1, ?1)
+             ON CONFLICT (id) DO UPDATE SET last_run = excluded.last_run",
+            [at],
+        )?;
+        Ok(())
+    }
+
+    /// Unix seconds of the last Auto-Sync run, also from before a restart.
+    pub fn last_sync_run(&self) -> Result<Option<i64>> {
+        Ok(self
+            .conn()
+            .query_row("SELECT last_run FROM sync_runs WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .optional()?)
     }
 
     /// Takes finished, failed and cancelled downloads off the queue page. Returns how many.
@@ -1172,6 +1235,12 @@ fn job(row: &Row) -> rusqlite::Result<Job> {
         queued_at: row.get(14)?,
         imdb_id: row.get(15)?,
         started_at: row.get(16)?,
+        replaces: match row.get::<_, Option<String>>(17)? {
+            Some(json) => serde_json::from_str(&json).map_err(|err| {
+                rusqlite::Error::FromSqlConversionFailure(17, Type::Text, Box::new(err))
+            })?,
+            None => Vec::new(),
+        },
     })
 }
 
@@ -1232,6 +1301,7 @@ mod tests {
             imdb_id: Some("tt0388629"),
             now: 100,
             replace_done: false,
+            replaces: &[],
         }
     }
 
@@ -1496,6 +1566,7 @@ mod tests {
         assert_eq!(store.enqueue(&new).unwrap(), None);
         let again = NewJob {
             replace_done: true,
+            replaces: &[],
             ..new_job(&first, admin.id)
         };
         assert_eq!(store.enqueue(&again).unwrap(), Some(id));
