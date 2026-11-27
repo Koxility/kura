@@ -4,6 +4,10 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Changed
+
+- **The Auto-Sync page has room again.** Each tracked title is a card: its name with small chips under it for the language (with its flag), the episodes on disk and the newest episode on the site, and its state on the right (queued, waiting, check failed, nothing new) with a coloured dot. A click opens the site, the last check with its time, the episodes waiting for the language one per line, and *Open title* and *Remove*. Cards with a failed check or waiting episodes start open.
+
 ## [1.5.3] - 2026-11-27
 
 Auto-Sync, reworked after it missed a newly released episode. It now decides about every listed episode by what is on disk in the series' language, and its page shows what is really there.

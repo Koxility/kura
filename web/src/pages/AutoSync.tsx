@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link } from "react-router";
 import {
   api,
   episodeCode,
@@ -28,9 +28,6 @@ export function AutoSyncPage() {
   });
   const settings = useQuery(settingsQuery);
   const [term, setTerm] = useState("");
-  // Demo only: `?layout=under` shows the small chips under the name, else beside it.
-  const [params] = useSearchParams();
-  const under = params.get("layout") === "under";
   const exclude = useMutation({
     mutationFn: ({ title, excluded }: { title: TitleRef; excluded: boolean }) =>
       api("/autosync/exclude", "POST", { ...title, excluded }),
@@ -121,7 +118,6 @@ export function AutoSyncPage() {
             title={title}
             removing={remove.isPending}
             onRemove={() => remove.mutate({ site: title.site, slug: title.slug, title: title.title })}
-            under={under}
           />
         ))}
       </ul>
@@ -242,8 +238,6 @@ interface TitleProps {
   title: TrackedTitle;
   removing: boolean;
   onRemove: () => void;
-  /** Demo: small chips under the name, the site in the opened part. */
-  under?: boolean;
 }
 
 function RemoveButton({ title, removing, onRemove }: TitleProps) {
@@ -261,11 +255,10 @@ function RemoveButton({ title, removing, onRemove }: TitleProps) {
   );
 }
 
-/** Language, episodes on disk and the site's newest episode. Beside the name on wide screens,
- *  below it on phones. */
-function Chips({ title, className }: { title: TrackedTitle; className: string }) {
+/** Language, episodes on disk and the site's newest episode, small, under the name. */
+function Chips({ title }: { title: TrackedTitle }) {
   return (
-    <span className={`${styles.chips} ${className}`}>
+    <span className={styles.chips}>
       {title.language && (
         <span className={`${ui.tag} ${styles.chip}`}>
           <Flag language={title.language} /> {languageNames[title.language]}
@@ -285,10 +278,10 @@ function Chips({ title, className }: { title: TrackedTitle; className: string })
 }
 
 /** A title on a card of its own: name, language and what is on disk at a glance; a click
- *  shows the last check, the waiting episodes and the actions. Cards with a failed check or
+ *  shows the site, the last check, the waiting episodes and the actions. Cards with a failed check or
  *  waiting episodes start open. */
 function TitleCard(props: TitleProps) {
-  const { title, under } = props;
+  const { title } = props;
   const { tone, short } = state(title);
   const [open, setOpen] = useState(tone === "bad" || (title.check?.waiting.length ?? 0) > 0);
   return (
@@ -302,30 +295,19 @@ function TitleCard(props: TitleProps) {
         <span className={styles.chevron} aria-hidden="true">
           {open ? "▾" : "▸"}
         </span>
-        {under ? (
-          <span className={ui.grow}>
-            <span className={styles.name}>{title.title}</span>
-            <Chips title={title} className={styles.underChips} />
-          </span>
-        ) : (
-          <>
-            <span className={styles.nameBlock}>
-              <span className={styles.name}>{title.title}</span>
-              <span className={`${ui.muted} ${styles.site}`}>{siteNames[title.site]}</span>
-            </span>
-            <Chips title={title} className={styles.besideChips} />
-          </>
-        )}
+        <span className={ui.grow}>
+          <span className={styles.name}>{title.title}</span>
+          <Chips title={title} />
+        </span>
         <span className={styles.state}>
           <Dot tone={tone} />
           {short}
         </span>
       </button>
       <div className={styles.body}>
-        {!under && <Chips title={title} className={styles.belowChips} />}
         {open && (
           <div className={styles.details}>
-            {under && <p className={`${ui.muted} ${styles.siteLine}`}>On {siteNames[title.site]}</p>}
+            <p className={`${ui.muted} ${styles.siteLine}`}>On {siteNames[title.site]}</p>
             <LastCheck title={title} />
             <WaitingList title={title} />
             <div className={styles.detailActions}>

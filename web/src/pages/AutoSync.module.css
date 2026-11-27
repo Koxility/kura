@@ -84,12 +84,6 @@
   overflow-wrap: anywhere;
 }
 
-.site {
-  display: block;
-  margin-top: 2px;
-  font-size: var(--size-s);
-}
-
 .state {
   display: inline-flex;
   flex: none;
@@ -104,55 +98,29 @@
   padding: 0 24px 0 50px;
 }
 
+/* Under the name: language, episodes on disk, the site's newest episode. */
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-}
-
-/* Version 1, wide screens: the chips follow the name; the state stays at the right end. */
-.nameBlock {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
-.besideChips {
-  flex: 1;
-  justify-content: flex-start;
-  margin-left: 16px;
-}
-
-/* Version 2: smaller chips under the name, on every screen. */
-.underChips {
   gap: 6px;
   margin-top: 8px;
 }
 
-.underChips .chip {
+.chip {
+  display: inline-flex;
+  align-items: center;
   gap: 5px;
   padding: 2px 8px;
   font-size: var(--size-xs);
 }
 
-.underChips .chip svg {
+.chip svg {
   width: 18px;
   height: 12px;
 }
 
 .siteLine {
   margin: 0 0 12px;
-}
-
-.belowChips {
-  display: none;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  font-size: var(--size-s);
 }
 
 .details {
@@ -200,7 +168,7 @@
   margin-top: 20px;
 }
 
-/* Phones: less padding; the state goes under the name, the chips below. */
+/* Phones: less padding; the state goes under the name and its chips. */
 @media (max-width: 720px) {
   .bar {
     justify-content: center;
@@ -208,21 +176,12 @@
 
   .head {
     flex-wrap: wrap;
-    padding: 16px 16px 12px;
+    padding: 16px;
   }
 
   .state {
     flex: 0 0 100%;
     padding-left: 26px;
-  }
-
-  .besideChips {
-    display: none;
-  }
-
-  .belowChips {
-    display: flex;
-    padding-bottom: 16px;
   }
 
   .details {
