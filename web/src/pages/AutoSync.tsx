@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import {
   api,
   episodeCode,
@@ -28,6 +28,9 @@ export function AutoSyncPage() {
   });
   const settings = useQuery(settingsQuery);
   const [term, setTerm] = useState("");
+  // Demo only: `?layout=under` shows the small chips under the name, else beside it.
+  const [params] = useSearchParams();
+  const under = params.get("layout") === "under";
   const exclude = useMutation({
     mutationFn: ({ title, excluded }: { title: TitleRef; excluded: boolean }) =>
       api("/autosync/exclude", "POST", { ...title, excluded }),
@@ -118,6 +121,7 @@ export function AutoSyncPage() {
             title={title}
             removing={remove.isPending}
             onRemove={() => remove.mutate({ site: title.site, slug: title.slug, title: title.title })}
+            under={under}
           />
         ))}
       </ul>
@@ -238,6 +242,8 @@ interface TitleProps {
   title: TrackedTitle;
   removing: boolean;
   onRemove: () => void;
+  /** Demo: small chips under the name, the site in the opened part. */
+  under?: boolean;
 }
 
 function RemoveButton({ title, removing, onRemove }: TitleProps) {
@@ -282,7 +288,7 @@ function Chips({ title, className }: { title: TrackedTitle; className: string })
  *  shows the last check, the waiting episodes and the actions. Cards with a failed check or
  *  waiting episodes start open. */
 function TitleCard(props: TitleProps) {
-  const { title } = props;
+  const { title, under } = props;
   const { tone, short } = state(title);
   const [open, setOpen] = useState(tone === "bad" || (title.check?.waiting.length ?? 0) > 0);
   return (
@@ -296,20 +302,30 @@ function TitleCard(props: TitleProps) {
         <span className={styles.chevron} aria-hidden="true">
           {open ? "▾" : "▸"}
         </span>
-        <span className={ui.grow}>
-          <span className={styles.name}>{title.title}</span>
-          <span className={`${ui.muted} ${styles.site}`}>{siteNames[title.site]}</span>
-        </span>
-        <Chips title={title} className={styles.besideChips} />
+        {under ? (
+          <span className={ui.grow}>
+            <span className={styles.name}>{title.title}</span>
+            <Chips title={title} className={styles.underChips} />
+          </span>
+        ) : (
+          <>
+            <span className={styles.nameBlock}>
+              <span className={styles.name}>{title.title}</span>
+              <span className={`${ui.muted} ${styles.site}`}>{siteNames[title.site]}</span>
+            </span>
+            <Chips title={title} className={styles.besideChips} />
+          </>
+        )}
         <span className={styles.state}>
           <Dot tone={tone} />
           {short}
         </span>
       </button>
       <div className={styles.body}>
-        <Chips title={title} className={styles.belowChips} />
+        {!under && <Chips title={title} className={styles.belowChips} />}
         {open && (
           <div className={styles.details}>
+            {under && <p className={`${ui.muted} ${styles.siteLine}`}>On {siteNames[title.site]}</p>}
             <LastCheck title={title} />
             <WaitingList title={title} />
             <div className={styles.detailActions}>

@@ -110,10 +110,37 @@
   gap: 8px;
 }
 
-/* Wide screens: the chips sit right of the name, before the state. */
-.besideChips {
+/* Version 1, wide screens: the chips follow the name; the state stays at the right end. */
+.nameBlock {
   flex: 0 1 auto;
-  justify-content: flex-end;
+  min-width: 0;
+}
+
+.besideChips {
+  flex: 1;
+  justify-content: flex-start;
+  margin-left: 16px;
+}
+
+/* Version 2: smaller chips under the name, on every screen. */
+.underChips {
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.underChips .chip {
+  gap: 5px;
+  padding: 2px 8px;
+  font-size: var(--size-xs);
+}
+
+.underChips .chip svg {
+  width: 18px;
+  height: 12px;
+}
+
+.siteLine {
+  margin: 0 0 12px;
 }
 
 .belowChips {
