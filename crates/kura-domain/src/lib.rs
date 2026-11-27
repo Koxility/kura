@@ -207,6 +207,10 @@ pub struct Job {
     /// on downloads from before 1.2.10.
     #[serde(default)]
     pub started_at: Option<i64>,
+    /// Files in another language this download replaces once it is done. Auto-Sync sets it
+    /// when a better language of an episode came out. Not sent to the browser.
+    #[serde(skip)]
+    pub replaces: Vec<String>,
 }
 
 impl Job {

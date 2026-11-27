@@ -55,6 +55,10 @@ Admins queue downloads directly; normal users send requests, which an admin acce
 
 `downloaded.rs` in `kura-core` combines finished downloads from the database with series folders found in the libraries (directly and in a legacy `Series` folder), matched by IMDb ID or by a normalised title, and episode files matched by `SxxEyy` in their names. Lists from the sites get a `downloaded` flag; title pages ask for the downloaded episodes of one series.
 
+## Auto-Sync
+
+`sync/mod.rs` in `kura-core` tracks every series with a started download, reads its seasons from the site and hands each listed episode to `sync/reconcile.rs`. That decision is pure: from the episode files `downloaded.rs` found (with path and language), the series' jobs and the language order of the settings, it says whether the episode is on disk in the series' language, queued, cancelled, deleted after a download, held in a worse language (or to be replaced by the better one), waiting for the language, to be retried, or new. Only seasons that can hold something to do are read: from the newest downloaded one on, plus any with a failed download or a file in another language. A replacing download carries the old files in `jobs.replaces`; the worker deletes them, with their NFO and thumbnail, before the Jellyfin scan. Each check's result is kept as JSON in `sync_titles`, the last run in `sync_runs`.
+
 ## Storage
 
 One SQLite file. Settings are a single JSON row whose missing fields fall back to defaults, so adding a setting needs no migration. Renamed or removed settings are converted when they are read (`upgrade` in `kura-store`). A finished job keeps the path of its file, which makes the queue table the library index as well.

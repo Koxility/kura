@@ -41,7 +41,7 @@ pub use mail::RESET_TTL;
 pub use naming::{DEFAULT_TEMPLATE, default_template};
 pub use net::REPOSITORY;
 use serde::Serialize;
-pub use sync::{SyncStatus, TrackedTitle};
+pub use sync::{SyncStatus, TitleCheck, TrackedTitle, Waiting};
 pub use theme::{MOST_MUSIC_BYTES, Music};
 use tokio::{
     sync::{Notify, broadcast},
@@ -205,6 +205,8 @@ pub struct Core {
     /// Every series of a site, kept for the random pick.
     catalogs: Mutex<HashMap<SiteId, Catalog>>,
     sync: Mutex<sync::SyncState>,
+    /// Held for an Auto-Sync run, so a second one waits instead of running alongside.
+    sync_lock: tokio::sync::Mutex<()>,
     /// Wakes the Auto-Sync loop when its settings changed.
     sync_wake: Notify,
     /// When GitHub is asked next, and the newer release known so far.
@@ -275,6 +277,7 @@ impl Core {
             running: Mutex::default(),
             catalogs: Mutex::default(),
             sync: Mutex::default(),
+            sync_lock: tokio::sync::Mutex::new(()),
             sync_wake: Notify::new(),
             update: Mutex::default(),
             scan: Mutex::default(),
@@ -575,6 +578,7 @@ impl Core {
                 imdb_id: Some(imdb_id),
                 now: auth::now(),
                 replace_done: gone(season, number),
+                replaces: &[],
             };
             // An episode picked twice, alone and with its season, is queued once.
             queued += usize::from(self.store.enqueue(&new)?.is_some());
@@ -599,6 +603,7 @@ impl Core {
             imdb_id: job.imdb_id.as_deref(),
             now: auth::now(),
             replace_done: false,
+            replaces: &job.replaces,
         })?;
         self.changed();
         Ok(queued.is_some())
@@ -680,6 +685,8 @@ impl Core {
         let download = tokio::spawn(async move {
             let saved = match core.process(&job).await {
                 Ok((path, language)) => {
+                    // Before Jellyfin hears of the folder, so it reads the episode afresh.
+                    core.remove_replaced(&job, &path);
                     // The new file should show as downloaded at once.
                     core.forget_scan();
                     core.note_new_file(&path);

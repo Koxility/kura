@@ -1,7 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router";
-import { api, formatTime, settingsQuery, siteNames, type SyncStatus, type TitleRef } from "../api";
+import {
+  api,
+  episodeCode,
+  formatTime,
+  languageNames,
+  settingsQuery,
+  siteNames,
+  type SyncStatus,
+  type TitleRef,
+  type TrackedTitle,
+} from "../api";
+import { Flag } from "../Flag";
 import ui from "../ui.module.css";
 import styles from "./AutoSync.module.css";
 
@@ -100,31 +111,14 @@ export function AutoSyncPage() {
           Nothing is tracked. A title is tracked once one of its episodes is downloaded.
         </p>
       )}
-      <ul className={ui.list}>
+      <ul className={styles.cards}>
         {tracked.map((title) => (
-          <li key={`${title.site}/${title.slug}`} className={`${ui.row} ${styles.tracked}`}>
-            <div className={ui.grow}>
-              <Link to={`/series/${title.site}/${title.slug}`}>{title.title}</Link>{" "}
-              <span className={ui.muted}>
-                · {siteNames[title.site]} · {title.downloaded}{" "}
-                {title.downloaded === 1 ? "episode" : "episodes"}
-              </span>
-            </div>
-            <span className={ui.muted}>
-              {title.result ?? "Not checked yet"}
-              {title.checked_at && ` · ${formatTime(title.checked_at)}`}
-            </span>
-            <button
-              type="button"
-              className={ui.ghost}
-              disabled={remove.isPending}
-              title="Stop checking this title. It is tracked again once another episode of it is downloaded."
-              aria-label={`Remove ${title.title} from Auto-Sync`}
-              onClick={() => remove.mutate({ site: title.site, slug: title.slug, title: title.title })}
-            >
-              Remove
-            </button>
-          </li>
+          <TitleCard
+            key={`${title.site}/${title.slug}`}
+            title={title}
+            removing={remove.isPending}
+            onRemove={() => remove.mutate({ site: title.site, slug: title.slug, title: title.title })}
+          />
         ))}
       </ul>
 
@@ -182,5 +176,149 @@ export function AutoSyncPage() {
           ))}
       </ul>
     </>
+  );
+}
+
+type Tone = "ok" | "bad" | "warn" | "idle";
+
+/** The state of a title in a word or two, and its colour. */
+function state(title: TrackedTitle): { tone: Tone; short: string } {
+  const check = title.check;
+  if (!check) return { tone: "idle", short: "Not checked yet" };
+  if (check.error) return { tone: "bad", short: "Check failed" };
+  if (check.queued.length > 0) return { tone: "ok", short: `${check.queued.length} queued` };
+  if (check.waiting.length > 0) return { tone: "warn", short: `${check.waiting.length} waiting` };
+  return { tone: "idle", short: "Nothing new" };
+}
+
+const onDisk = (title: TrackedTitle) =>
+  `${title.on_disk} ${title.on_disk === 1 ? "episode" : "episodes"} on disk`;
+
+function Dot({ tone }: { tone: Tone }) {
+  return <span className={`${styles.dot} ${styles[tone]}`} aria-hidden="true" />;
+}
+
+/** Episodes that wait for the title's language, one per line. */
+function WaitingList({ title }: { title: TrackedTitle }) {
+  const waiting = title.check?.waiting ?? [];
+  if (waiting.length === 0) return null;
+  const language = title.language ? languageNames[title.language] : "its language";
+  return (
+    <div className={styles.waiting}>
+      <div className={styles.label}>Waiting for {language}</div>
+      <ul>
+        {waiting.map(({ episode, offered }) => (
+          <li key={episode.join("-")}>
+            <span className={ui.mono}>{episodeCode(...episode)}</span>
+            <span className={ui.muted}>
+              {offered.length > 0
+                ? `offered: ${offered.map((offer) => languageNames[offer]).join(", ")}`
+                : "not offered in any language yet"}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** The last check: what it did, and when. */
+function LastCheck({ title }: { title: TrackedTitle }) {
+  const check = title.check;
+  if (!check) return <p className={styles.status}>Not checked yet</p>;
+  return (
+    <div className={styles.status}>
+      <p className={check.error ? ui.bad : undefined}>{check.summary}</p>
+      <p className={ui.muted}>Checked {formatTime(check.checked_at)}</p>
+    </div>
+  );
+}
+
+interface TitleProps {
+  title: TrackedTitle;
+  removing: boolean;
+  onRemove: () => void;
+}
+
+function RemoveButton({ title, removing, onRemove }: TitleProps) {
+  return (
+    <button
+      type="button"
+      className={ui.ghost}
+      disabled={removing}
+      title="Stop checking this title. It is tracked again once another episode of it is downloaded."
+      aria-label={`Remove ${title.title} from Auto-Sync`}
+      onClick={onRemove}
+    >
+      Remove
+    </button>
+  );
+}
+
+/** Language, episodes on disk and the site's newest episode, small, under the name. */
+function Chips({ title }: { title: TrackedTitle }) {
+  return (
+    <span className={styles.chips}>
+      {title.language && (
+        <span className={`${ui.tag} ${styles.chip}`}>
+          <Flag language={title.language} /> {languageNames[title.language]}
+        </span>
+      )}
+      <span className={`${ui.tag} ${styles.chip}`}>
+        {onDisk(title)}
+        {title.newest_on_disk && ` · up to ${episodeCode(...title.newest_on_disk)}`}
+      </span>
+      {title.check?.newest_listed && (
+        <span className={`${ui.tag} ${styles.chip}`}>
+          Site: up to {episodeCode(...title.check.newest_listed)}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** A title on a card of its own: name, language and what is on disk at a glance; a click
+ *  shows the site, the last check, the waiting episodes and the actions. Cards with a failed check or
+ *  waiting episodes start open. */
+function TitleCard(props: TitleProps) {
+  const { title } = props;
+  const { tone, short } = state(title);
+  const [open, setOpen] = useState(tone === "bad" || (title.check?.waiting.length ?? 0) > 0);
+  return (
+    <li className={styles.card}>
+      <button
+        type="button"
+        className={styles.head}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <span className={styles.chevron} aria-hidden="true">
+          {open ? "▾" : "▸"}
+        </span>
+        <span className={ui.grow}>
+          <span className={styles.name}>{title.title}</span>
+          <Chips title={title} />
+        </span>
+        <span className={styles.state}>
+          <Dot tone={tone} />
+          {short}
+        </span>
+      </button>
+      <div className={styles.body}>
+        {open && (
+          <div className={styles.details}>
+            <p className={`${ui.muted} ${styles.siteLine}`}>On {siteNames[title.site]}</p>
+            <LastCheck title={title} />
+            <WaitingList title={title} />
+            <div className={styles.detailActions}>
+              <Link to={`/series/${title.site}/${title.slug}`} className={ui.button}>
+                Open title
+              </Link>
+              <RemoveButton {...props} />
+            </div>
+          </div>
+        )}
+      </div>
+    </li>
   );
 }

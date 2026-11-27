@@ -9,19 +9,186 @@
   font-size: var(--size-s);
 }
 
-/* Phones: the title on its own line, the last check and Remove below it. */
+/* A status dot in the colour of a title's state. */
+.dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.ok {
+  background: var(--ok);
+}
+
+.bad {
+  background: var(--bad);
+}
+
+.warn {
+  background: var(--warn);
+}
+
+.idle {
+  background: var(--text-3);
+}
+
+/* Tracked titles: one card each. */
+.cards {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* The head opens and closes the card. */
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 20px 24px;
+  border: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: transparent;
+  color: var(--text);
+  font: 400 var(--size-m) / 1.5 var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+
+.head:hover .name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.chevron {
+  flex: none;
+  width: 14px;
+  padding-top: 2px;
+  color: var(--text-3);
+  font-size: var(--size-xs);
+}
+
+.name {
+  display: block;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--size-s);
+  white-space: nowrap;
+}
+
+/* Everything below the head lines up with the name, past the chevron. */
+.body {
+  padding: 0 24px 0 50px;
+}
+
+/* Under the name: language, episodes on disk, the site's newest episode. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  font-size: var(--size-xs);
+}
+
+.chip svg {
+  width: 18px;
+  height: 12px;
+}
+
+.siteLine {
+  margin: 0 0 12px;
+}
+
+.details {
+  padding: 16px 0 20px;
+  border-top: 1px solid var(--line);
+  font-size: var(--size-s);
+}
+
+.status p {
+  margin: 0;
+}
+
+.status p + p {
+  margin-top: 2px;
+}
+
+.waiting {
+  margin-top: 16px;
+}
+
+.label {
+  margin-bottom: 6px;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.waiting ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.waiting li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.detailActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/* Phones: less padding; the state goes under the name and its chips. */
 @media (max-width: 720px) {
   .bar {
     justify-content: center;
   }
 
-  .tracked > div {
-    flex: 0 0 100%;
+  .head {
+    flex-wrap: wrap;
+    padding: 16px;
   }
 
-  .tracked > span {
-    flex: 1;
-    min-width: 0;
-    font-size: var(--size-s);
+  .state {
+    flex: 0 0 100%;
+    padding-left: 26px;
+  }
+
+  .details {
+    padding-bottom: 16px;
+  }
+
+  .body {
+    padding: 0 16px 0 42px;
   }
 }
