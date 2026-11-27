@@ -255,6 +255,29 @@ function RemoveButton({ title, removing, onRemove }: TitleProps) {
   );
 }
 
+/** Language, episodes on disk and the site's newest episode. Beside the name on wide screens,
+ *  below it on phones. */
+function Chips({ title, className }: { title: TrackedTitle; className: string }) {
+  return (
+    <span className={`${styles.chips} ${className}`}>
+      {title.language && (
+        <span className={`${ui.tag} ${styles.chip}`}>
+          <Flag language={title.language} /> {languageNames[title.language]}
+        </span>
+      )}
+      <span className={`${ui.tag} ${styles.chip}`}>
+        {onDisk(title)}
+        {title.newest_on_disk && ` · up to ${episodeCode(...title.newest_on_disk)}`}
+      </span>
+      {title.check?.newest_listed && (
+        <span className={`${ui.tag} ${styles.chip}`}>
+          Site: up to {episodeCode(...title.check.newest_listed)}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** A title on a card of its own: name, language and what is on disk at a glance; a click
  *  shows the last check, the waiting episodes and the actions. Cards with a failed check or
  *  waiting episodes start open. */
@@ -277,28 +300,14 @@ function TitleCard(props: TitleProps) {
           <span className={styles.name}>{title.title}</span>
           <span className={`${ui.muted} ${styles.site}`}>{siteNames[title.site]}</span>
         </span>
+        <Chips title={title} className={styles.besideChips} />
         <span className={styles.state}>
           <Dot tone={tone} />
           {short}
         </span>
       </button>
       <div className={styles.body}>
-        <div className={styles.chips}>
-          {title.language && (
-            <span className={`${ui.tag} ${styles.chip}`}>
-              <Flag language={title.language} /> {languageNames[title.language]}
-            </span>
-          )}
-          <span className={`${ui.tag} ${styles.chip}`}>
-            {onDisk(title)}
-            {title.newest_on_disk && ` · up to ${episodeCode(...title.newest_on_disk)}`}
-          </span>
-          {title.check?.newest_listed && (
-            <span className={`${ui.tag} ${styles.chip}`}>
-              Site: up to {episodeCode(...title.check.newest_listed)}
-            </span>
-          )}
-        </div>
+        <Chips title={title} className={styles.belowChips} />
         {open && (
           <div className={styles.details}>
             <LastCheck title={title} />

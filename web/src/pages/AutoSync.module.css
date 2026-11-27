@@ -55,7 +55,7 @@
   align-items: flex-start;
   gap: 12px;
   width: 100%;
-  padding: 20px 24px 0;
+  padding: 20px 24px;
   border: 0;
   border-radius: var(--radius) var(--radius) 0 0;
   background: transparent;
@@ -101,13 +101,23 @@
 
 /* Everything below the head lines up with the name, past the chevron. */
 .body {
-  padding: 16px 24px 20px 50px;
+  padding: 0 24px 0 50px;
 }
 
 .chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Wide screens: the chips sit right of the name, before the state. */
+.besideChips {
+  flex: 0 1 auto;
+  justify-content: flex-end;
+}
+
+.belowChips {
+  display: none;
 }
 
 .chip {
@@ -119,8 +129,7 @@
 }
 
 .details {
-  margin-top: 16px;
-  padding-top: 16px;
+  padding: 16px 0 20px;
   border-top: 1px solid var(--line);
   font-size: var(--size-s);
 }
@@ -164,23 +173,36 @@
   margin-top: 20px;
 }
 
-/* Phones: less padding; the state stays right of the name, which wraps beside it. */
+/* Phones: less padding; the state goes under the name, the chips below. */
 @media (max-width: 720px) {
   .bar {
     justify-content: center;
   }
 
   .head {
-    gap: 10px;
-    padding: 16px 16px 0;
+    flex-wrap: wrap;
+    padding: 16px 16px 12px;
   }
 
   .state {
-    padding-top: 2px;
-    font-size: var(--size-xs);
+    flex: 0 0 100%;
+    padding-left: 26px;
+  }
+
+  .besideChips {
+    display: none;
+  }
+
+  .belowChips {
+    display: flex;
+    padding-bottom: 16px;
+  }
+
+  .details {
+    padding-bottom: 16px;
   }
 
   .body {
-    padding: 12px 16px 16px 42px;
+    padding: 0 16px 0 42px;
   }
 }
