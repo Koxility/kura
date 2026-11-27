@@ -20,7 +20,7 @@ use kura_store::{NewJob, StoreError};
 use reconcile::{Decision, Title};
 use serde::{Deserialize, Serialize};
 
-use crate::{Core, Result, auth::now, downloaded::Found, naming::language_name, parse_time};
+use crate::{Core, Result, auth::now, downloaded::Found, parse_time};
 
 /// The wait before a page that could not be read is asked for again. None in tests.
 const FETCH_PAUSE: Duration = Duration::from_secs(if cfg!(test) { 0 } else { 3 });
@@ -180,7 +180,7 @@ impl Core {
             ..TitleCheck::default()
         };
         let Some(last) = own.iter().max_by_key(|job| job.queued_at).copied() else {
-            check.summary = summary(&check, None);
+            check.summary = summary(&check);
             return Ok(check);
         };
         // Files in the library count too, also ones Kura did not download.
@@ -206,7 +206,7 @@ impl Core {
         };
         if anchor.is_none() && pending.is_empty() {
             // Nothing finished yet: the first download decides where to go on.
-            check.summary = summary(&check, language);
+            check.summary = summary(&check);
             return Ok(check);
         }
 
@@ -300,7 +300,7 @@ impl Core {
         if !errors.is_empty() {
             check.error = Some(errors.join("; "));
         }
-        check.summary = summary(&check, language);
+        check.summary = summary(&check);
         Ok(check)
     }
 
@@ -424,9 +424,9 @@ where
     }
 }
 
-/// `S02E05`.
+/// `S02E005`, the same form as in file names.
 fn code((season, number): (u32, u32)) -> String {
-    format!("S{season:02}E{number:02}")
+    format!("S{season:02}E{number:03}")
 }
 
 /// Up to three episode codes, and how many more.
@@ -442,8 +442,8 @@ fn codes(episodes: &[(u32, u32)]) -> String {
     shown.join(", ")
 }
 
-/// The line the page shows for a check.
-fn summary(check: &TitleCheck, language: Option<Language>) -> String {
+/// The line the page shows for a check; the page lists waiting episodes on their own.
+fn summary(check: &TitleCheck) -> String {
     let mut parts = Vec::new();
     if let Some(error) = &check.error {
         parts.push(format!("Check failed: {error}"));
@@ -458,16 +458,6 @@ fn summary(check: &TitleCheck, language: Option<Language>) -> String {
     }
     if !check.retried.is_empty() {
         parts.push(format!("tried again {}", codes(&check.retried)));
-    }
-    if !check.waiting.is_empty() {
-        let episodes: Vec<_> = check
-            .waiting
-            .iter()
-            .map(|waiting| waiting.episode)
-            .collect();
-        let verb = if episodes.len() == 1 { "waits" } else { "wait" };
-        let language = language.map_or("its language", language_name);
-        parts.push(format!("{} {verb} for {language}", codes(&episodes)));
     }
     if parts.is_empty() {
         "Nothing new".to_owned()

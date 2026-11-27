@@ -272,12 +272,40 @@ export interface Request {
   created_at: number;
 }
 
+/** `[season, episode]`. */
+export type EpisodePair = [number, number];
+
+/** What the last Auto-Sync check of a title found. */
+export interface TitleCheck {
+  checked_at: number;
+  /** Why the check failed, or which seasons could not be read. */
+  error: string | null;
+  /** The newest episode the site lists, in any language. */
+  newest_listed: EpisodePair | null;
+  queued: EpisodePair[];
+  retried: EpisodePair[];
+  replacing: EpisodePair[];
+  /** Wanted episodes not offered in the title's language yet, with the languages they are. */
+  waiting: { episode: EpisodePair; offered: Language[] }[];
+  summary: string;
+}
+
+export interface TrackedTitle extends TitleRef {
+  /** The language Auto-Sync follows for this title. */
+  language: Language | null;
+  /** Episodes in the libraries in that language, now. */
+  on_disk: number;
+  newest_on_disk: EpisodePair | null;
+  check: TitleCheck | null;
+}
+
 export interface SyncStatus {
   enabled: boolean;
   last_run: number | null;
   next_run: number | null;
-  titles: (TitleRef & { downloaded: number; checked_at: number | null; result: string | null })[];
+  titles: TrackedTitle[];
 }
+
 
 export interface LibraryRoot {
   id: number;
