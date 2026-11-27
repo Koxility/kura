@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link } from "react-router";
 import {
   api,
   episodeCode,
@@ -28,9 +28,6 @@ export function AutoSyncPage() {
   });
   const settings = useQuery(settingsQuery);
   const [term, setTerm] = useState("");
-  // Demo only: `?layout=rows` shows the compact rows, anything else the cards.
-  const [params] = useSearchParams();
-  const layout = params.get("layout") === "rows" ? "rows" : "cards";
   const exclude = useMutation({
     mutationFn: ({ title, excluded }: { title: TitleRef; excluded: boolean }) =>
       api("/autosync/exclude", "POST", { ...title, excluded }),
@@ -114,29 +111,16 @@ export function AutoSyncPage() {
           Nothing is tracked. A title is tracked once one of its episodes is downloaded.
         </p>
       )}
-      {layout === "rows" ? (
-        <ul className={ui.list}>
-          {tracked.map((title) => (
-            <TitleRow
-              key={`${title.site}/${title.slug}`}
-              title={title}
-              removing={remove.isPending}
-              onRemove={() => remove.mutate({ site: title.site, slug: title.slug, title: title.title })}
-            />
-          ))}
-        </ul>
-      ) : (
-        <ul className={styles.cards}>
-          {tracked.map((title) => (
-            <TitleCard
-              key={`${title.site}/${title.slug}`}
-              title={title}
-              removing={remove.isPending}
-              onRemove={() => remove.mutate({ site: title.site, slug: title.slug, title: title.title })}
-            />
-          ))}
-        </ul>
-      )}
+      <ul className={styles.cards}>
+        {tracked.map((title) => (
+          <TitleCard
+            key={`${title.site}/${title.slug}`}
+            title={title}
+            removing={remove.isPending}
+            onRemove={() => remove.mutate({ site: title.site, slug: title.slug, title: title.title })}
+          />
+        ))}
+      </ul>
 
       <h2 className={ui.section}>Exclude titles</h2>
       <div className={ui.toolbar}>
@@ -241,13 +225,12 @@ function WaitingList({ title }: { title: TrackedTitle }) {
 /** The last check: what it did, and when. */
 function LastCheck({ title }: { title: TrackedTitle }) {
   const check = title.check;
-  const { tone } = state(title);
+  if (!check) return <p className={styles.status}>Not checked yet</p>;
   return (
-    <p className={styles.status}>
-      <Dot tone={tone} />
-      <span className={check?.error ? ui.bad : undefined}>{check?.summary ?? "Not checked yet"}</span>
-      {check && <span className={ui.muted}>· {formatTime(check.checked_at)}</span>}
-    </p>
+    <div className={styles.status}>
+      <p className={check.error ? ui.bad : undefined}>{check.summary}</p>
+      <p className={ui.muted}>Checked {formatTime(check.checked_at)}</p>
+    </div>
   );
 }
 
@@ -272,90 +255,63 @@ function RemoveButton({ title, removing, onRemove }: TitleProps) {
   );
 }
 
-/** Demo A: every title on a card of its own. */
+/** A title on a card of its own: name, language and what is on disk at a glance; a click
+ *  shows the last check, the waiting episodes and the actions. Cards with a failed check or
+ *  waiting episodes start open. */
 function TitleCard(props: TitleProps) {
-  const { title } = props;
-  return (
-    <li className={styles.card}>
-      <div className={styles.head}>
-        <div className={ui.grow}>
-          <Link to={`/series/${title.site}/${title.slug}`} className={styles.name}>
-            {title.title}
-          </Link>
-          <div className={`${ui.muted} ${styles.site}`}>{siteNames[title.site]}</div>
-        </div>
-        <RemoveButton {...props} />
-      </div>
-      <div className={styles.chips}>
-        {title.language && (
-          <span className={`${ui.tag} ${styles.chip}`}>
-            <Flag language={title.language} /> {languageNames[title.language]}
-          </span>
-        )}
-        <span className={`${ui.tag} ${styles.chip}`}>
-          {onDisk(title)}
-          {title.newest_on_disk && ` · up to ${episodeCode(...title.newest_on_disk)}`}
-        </span>
-        {title.check?.newest_listed && (
-          <span className={`${ui.tag} ${styles.chip}`}>
-            Site: up to {episodeCode(...title.check.newest_listed)}
-          </span>
-        )}
-      </div>
-      <LastCheck title={title} />
-      <WaitingList title={title} />
-    </li>
-  );
-}
-
-/** Demo B: one calm line per title; a click shows the rest. */
-function TitleRow(props: TitleProps) {
   const { title } = props;
   const { tone, short } = state(title);
   const [open, setOpen] = useState(tone === "bad" || (title.check?.waiting.length ?? 0) > 0);
   return (
-    <li className={styles.item}>
+    <li className={styles.card}>
       <button
         type="button"
-        className={styles.summary}
+        className={styles.head}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
         <span className={styles.chevron} aria-hidden="true">
           {open ? "▾" : "▸"}
         </span>
-        <span className={styles.rowName}>{title.title}</span>
-        <span className={styles.rowFacts}>
-          {title.language && <Flag language={title.language} />}
-          <span className={ui.muted}>{onDisk(title)}</span>
-          <span className={styles.rowState}>
-            <Dot tone={tone} />
-            {short}
-          </span>
+        <span className={ui.grow}>
+          <span className={styles.name}>{title.title}</span>
+          <span className={`${ui.muted} ${styles.site}`}>{siteNames[title.site]}</span>
+        </span>
+        <span className={styles.state}>
+          <Dot tone={tone} />
+          {short}
         </span>
       </button>
-      {open && (
-        <div className={styles.details}>
-          <p className={ui.muted}>
-            {[
-              siteNames[title.site],
-              title.language && languageNames[title.language],
-              title.newest_on_disk && `on disk up to ${episodeCode(...title.newest_on_disk)}`,
-              title.check?.newest_listed && `site has up to ${episodeCode(...title.check.newest_listed)}`,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-          <LastCheck title={title} />
-          <WaitingList title={title} />
-          <div className={styles.detailActions}>
-            <Link to={`/series/${title.site}/${title.slug}`} className={ui.button}>
-              Open title
-            </Link>
-            <RemoveButton {...props} />
-          </div>
+      <div className={styles.body}>
+        <div className={styles.chips}>
+          {title.language && (
+            <span className={`${ui.tag} ${styles.chip}`}>
+              <Flag language={title.language} /> {languageNames[title.language]}
+            </span>
+          )}
+          <span className={`${ui.tag} ${styles.chip}`}>
+            {onDisk(title)}
+            {title.newest_on_disk && ` · up to ${episodeCode(...title.newest_on_disk)}`}
+          </span>
+          {title.check?.newest_listed && (
+            <span className={`${ui.tag} ${styles.chip}`}>
+              Site: up to {episodeCode(...title.check.newest_listed)}
+            </span>
+          )}
         </div>
-      )}
+        {open && (
+          <div className={styles.details}>
+            <LastCheck title={title} />
+            <WaitingList title={title} />
+            <div className={styles.detailActions}>
+              <Link to={`/series/${title.site}/${title.slug}`} className={ui.button}>
+                Open title
+              </Link>
+              <RemoveButton {...props} />
+            </div>
+          </div>
+        )}
+      </div>
     </li>
   );
 }
