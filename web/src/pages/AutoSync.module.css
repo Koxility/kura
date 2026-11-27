@@ -9,25 +9,204 @@
   font-size: var(--size-s);
 }
 
-/* Episodes that wait for the title's language, below its name. */
+/* Shared: a status dot in the colour of a title's state. */
+.dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.ok {
+  background: var(--ok);
+}
+
+.bad {
+  background: var(--bad);
+}
+
+.warn {
+  background: var(--warn);
+}
+
+.idle {
+  background: var(--text-3);
+}
+
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 0;
+  font-size: var(--size-s);
+}
+
 .waiting {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: var(--size-s);
+}
+
+.label {
+  margin-bottom: 6px;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.waiting ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.waiting li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+/* Demo A: cards. */
+.cards {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.name {
+  font-size: var(--size-m);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.site {
   margin-top: 2px;
   font-size: var(--size-s);
 }
 
-/* Phones: the title on its own line, the last check and Remove below it. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: var(--size-s);
+}
+
+/* Demo B: compact rows that open. */
+.item {
+  border-bottom: 1px solid var(--line);
+}
+
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 16px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: 400 var(--size-m) / 1.5 var(--font);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--fast);
+}
+
+.summary:hover {
+  background: var(--hover);
+}
+
+.chevron {
+  flex: none;
+  width: 16px;
+  color: var(--text-3);
+  font-size: var(--size-xs);
+}
+
+.rowName {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.rowFacts {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 16px;
+  font-size: var(--size-s);
+}
+
+.rowState {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 110px;
+}
+
+.details {
+  padding: 0 4px 20px 32px;
+  font-size: var(--size-s);
+}
+
+.details > p:first-child {
+  margin: 0;
+}
+
+.detailActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* Phones */
 @media (max-width: 720px) {
   .bar {
     justify-content: center;
   }
 
-  .tracked > div {
-    flex: 0 0 100%;
+  .card {
+    padding: 16px;
   }
 
-  .tracked > span {
-    flex: 1;
-    min-width: 0;
-    font-size: var(--size-s);
+  .summary {
+    flex-wrap: wrap;
+  }
+
+  .rowFacts {
+    flex: 0 0 100%;
+    padding-left: 28px;
+  }
+
+  .details {
+    padding-left: 28px;
   }
 }
