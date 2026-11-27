@@ -164,20 +164,20 @@
   margin-top: 20px;
 }
 
-/* Phones: less padding; the state goes under the name. */
+/* Phones: less padding; the state stays right of the name, which wraps beside it. */
 @media (max-width: 720px) {
   .bar {
     justify-content: center;
   }
 
   .head {
-    flex-wrap: wrap;
+    gap: 10px;
     padding: 16px 16px 0;
   }
 
   .state {
-    flex: 0 0 100%;
-    padding-left: 26px;
+    padding-top: 2px;
+    font-size: var(--size-xs);
   }
 
   .body {
