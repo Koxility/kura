@@ -4,6 +4,10 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.5.3] - 2026-11-27
+
+Auto-Sync, reworked after it missed a newly released episode. It now decides about every listed episode by what is on disk in the series' language, and its page shows what is really there.
+
 ### Fixed
 
 - **Auto-Sync no longer misses an episode because of an earlier download in another language.** Any download on record counted as "already there", whatever its language and whether its file was still on disk. So once an episode had been downloaded in German Sub and that file was gone, its German Dub was never queued, neither on schedule nor with *Sync now*. Now an episode counts as downloaded only while a file of it is in the library in the series' language (or in a file whose name tells none).
@@ -369,7 +373,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.5.2...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.5.3...HEAD
+[1.5.3]: https://github.com/Koxility/kura/compare/v1.5.2...v1.5.3
 [1.5.2]: https://github.com/Koxility/kura/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/Koxility/kura/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/Koxility/kura/compare/v1.4.0...v1.5.0
