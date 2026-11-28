@@ -479,8 +479,9 @@ function AutoSync({ draft, change }: SectionProps) {
         Only new episodes
       </label>
       <p className={styles.hint}>
-        On: only episodes after the newest downloaded one. Off: missing earlier episodes are
-        downloaded too.
+        When a series shows up in the site's list of new episodes. Off: every episode it is
+        missing is downloaded. On: only the announced episodes and those between them. Sync now
+        always checks every series in full.
       </p>
 
       <fieldset className={styles.schedule}>

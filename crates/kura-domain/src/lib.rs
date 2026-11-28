@@ -479,7 +479,8 @@ pub struct Library {
 #[serde(default)]
 pub struct AutoSync {
     pub enabled: bool,
-    /// On: only episodes after the newest downloaded one. Off: gaps are filled too.
+    /// When a series is in a site's list of new episodes. Off: every episode it is missing.
+    /// On: only the announced ones and those between them.
     pub only_new: bool,
     pub schedule: Schedule,
     /// Titles Auto-Sync leaves alone.
@@ -501,7 +502,7 @@ impl Default for AutoSync {
     fn default() -> Self {
         Self {
             enabled: false,
-            only_new: true,
+            only_new: false,
             schedule: Schedule::Every { minutes: 60 },
             excluded: Vec::new(),
             removed: Vec::new(),

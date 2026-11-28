@@ -161,6 +161,11 @@ CREATE TABLE sync_runs (
 );
 ";
 
+/// 1.5.4: what the last Auto-Sync run did, as JSON.
+const AUTO_SYNC_REPORT: &str = "
+ALTER TABLE sync_runs ADD COLUMN report TEXT;
+";
+
 /// What became of an invite link that someone used to create an account.
 #[derive(Debug, PartialEq)]
 pub enum Redeemed {
@@ -265,6 +270,7 @@ impl Store {
             M::up(INVITES),
             M::up(EMAIL_CHANGES),
             M::up(AUTO_SYNC_STATE),
+            M::up(AUTO_SYNC_REPORT),
         ])
         .to_latest(&mut conn)?;
         Ok(Self {
@@ -995,13 +1001,26 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn set_last_sync_run(&self, at: i64) -> Result<()> {
+    /// Notes an Auto-Sync run: when, and its report as JSON.
+    pub fn set_last_sync_run(&self, at: i64, report: &str) -> Result<()> {
         self.conn().execute(
-            "INSERT INTO sync_runs (id, last_run) VALUES (1, ?1)
-             ON CONFLICT (id) DO UPDATE SET last_run = excluded.last_run",
-            [at],
+            "INSERT INTO sync_runs (id, last_run, report) VALUES (1, ?1, ?2)
+             ON CONFLICT (id) DO UPDATE SET last_run = excluded.last_run,
+                                            report = excluded.report",
+            params![at, report],
         )?;
         Ok(())
+    }
+
+    /// The report of the last Auto-Sync run, as saved; `None` before the first.
+    pub fn last_sync_report(&self) -> Result<Option<String>> {
+        Ok(self
+            .conn()
+            .query_row("SELECT report FROM sync_runs WHERE id = 1", [], |row| {
+                row.get::<_, Option<String>>(0)
+            })
+            .optional()?
+            .flatten())
     }
 
     /// Unix seconds of the last Auto-Sync run, also from before a restart.
@@ -1328,7 +1347,7 @@ mod tests {
         };
         store.enqueue(&upgrade).unwrap().unwrap();
         assert_eq!(store.last_sync_run().unwrap(), None);
-        store.set_last_sync_run(500).unwrap();
+        store.set_last_sync_run(500, "{\"queued\":3}").unwrap();
         store
             .save_sync_result(SiteId::AniWorld, "frieren", "{\"a\":1}")
             .unwrap();
@@ -1340,6 +1359,10 @@ mod tests {
         let store = Store::open(&path).unwrap();
         assert_eq!(store.jobs().unwrap()[0].replaces, old);
         assert_eq!(store.last_sync_run().unwrap(), Some(500));
+        assert_eq!(
+            store.last_sync_report().unwrap().as_deref(),
+            Some("{\"queued\":3}")
+        );
         let saved = store.sync_results().unwrap();
         assert_eq!(
             saved,
