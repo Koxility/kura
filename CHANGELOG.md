@@ -4,6 +4,11 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Fixed
+
+- **Auto-Sync downloads an episode whose dub comes out after a later one.** With *Only new episodes*, everything up to the newest episode on record counted as old, also a gap in between: with episodes 1 to 4 on disk in German Dub and a German Dub download of episode 6 on record, episode 5 was never listed as waiting and never queued once its dub was out. Now, in the newest season, every episode after the first one you have is wanted, and only those before it (and earlier seasons) count as passed over.
+- **The Auto-Sync page says why an episode is left out.** An opened card lists the episodes of the newest season Auto-Sync leaves alone, each with its reason: deleted after a download, cancelled, on disk in a language ranked lower, or before the first episode you have of the season. Each check also writes one line per series to the log.
+
 ## [1.5.3] - 2026-11-27
 
 Auto-Sync, reworked after it missed a newly released episode. It now decides about every listed episode by what is on disk in the series' language, and its page shows what is really there.

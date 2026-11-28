@@ -287,8 +287,17 @@ export interface TitleCheck {
   replacing: EpisodePair[];
   /** Wanted episodes not offered in the title's language yet, with the languages they are. */
   waiting: { episode: EpisodePair; offered: Language[] }[];
+  /** Listed episodes of the newest season left alone, and why. */
+  left_out: LeftOut[];
   summary: string;
 }
+
+export type LeftOut = { episode: EpisodePair } & (
+  | { reason: "deleted" }
+  | { reason: "cancelled" }
+  | { reason: "held"; language: Language | null }
+  | { reason: "skipped"; first: EpisodePair }
+);
 
 export interface TrackedTitle extends TitleRef {
   /** The language Auto-Sync follows for this title. */

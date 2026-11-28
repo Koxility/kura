@@ -41,7 +41,7 @@ pub use mail::RESET_TTL;
 pub use naming::{DEFAULT_TEMPLATE, default_template};
 pub use net::REPOSITORY;
 use serde::Serialize;
-pub use sync::{SyncStatus, TitleCheck, TrackedTitle, Waiting};
+pub use sync::{LeftOut, SyncStatus, TitleCheck, TrackedTitle, Waiting, Why};
 pub use theme::{MOST_MUSIC_BYTES, Music};
 use tokio::{
     sync::{Notify, broadcast},

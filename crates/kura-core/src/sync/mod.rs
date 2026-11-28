@@ -20,7 +20,7 @@ use kura_store::{NewJob, StoreError};
 use reconcile::{Decision, Title};
 use serde::{Deserialize, Serialize};
 
-use crate::{Core, Result, auth::now, downloaded::Found, parse_time};
+use crate::{Core, Result, auth::now, downloaded::Found, naming::language_name, parse_time};
 
 /// The wait before a page that could not be read is asked for again. None in tests.
 const FETCH_PAUSE: Duration = Duration::from_secs(if cfg!(test) { 0 } else { 3 });
@@ -73,8 +73,31 @@ pub struct TitleCheck {
     pub replacing: Vec<(u32, u32)>,
     /// Wanted episodes the site does not offer in the title's language yet.
     pub waiting: Vec<Waiting>,
+    /// Listed episodes of the newest season left alone, and why.
+    pub left_out: Vec<LeftOut>,
     /// One line for the page.
     pub summary: String,
+}
+
+/// A listed episode Auto-Sync leaves alone, and why.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LeftOut {
+    pub episode: (u32, u32),
+    #[serde(flatten)]
+    pub why: Why,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "reason", rename_all = "snake_case")]
+pub enum Why {
+    /// Downloaded in the title's language, and its file is gone since.
+    Deleted,
+    /// Someone cancelled its download.
+    Cancelled,
+    /// Only on disk in this language, which the settings rank lower; the title's is not out.
+    Held { language: Option<Language> },
+    /// With "only new", before `first`, the first episode the title has of this season.
+    Skipped { first: (u32, u32) },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -187,6 +210,8 @@ impl Core {
         let files = self.title_files(title, &own)?;
         let language = language_of(&settings.languages, &files, &own);
         let anchor = reconcile::anchor(language, &files, &own);
+        let newest_gone = anchor
+            .is_some_and(|anchor| !reconcile::present(language, &files).contains(&anchor.newest));
         // Seasons before the newest one only matter for a failed download or a file in
         // another language.
         let pending: Vec<u32> = own
@@ -202,7 +227,7 @@ impl Core {
             .collect();
         let wanted = |season: u32| {
             pending.contains(&season)
-                || anchor.is_some_and(|(newest, _)| !only_new || season >= newest)
+                || anchor.is_some_and(|anchor| !only_new || season >= anchor.newest.0)
         };
         if anchor.is_none() && pending.is_empty() {
             // Nothing finished yet: the first download decides where to go on.
@@ -242,11 +267,32 @@ impl Core {
                 let key = (season, episode.number);
                 check.newest_listed = check.newest_listed.max(Some(key));
                 let decision = reconcile::decide(episode, &context);
-                if let Decision::Waiting(offered) = &decision {
-                    check.waiting.push(Waiting {
-                        episode: key,
-                        offered: offered.clone(),
-                    });
+                let why = match &decision {
+                    Decision::Waiting(offered) => {
+                        check.waiting.push(Waiting {
+                            episode: key,
+                            offered: offered.clone(),
+                        });
+                        None
+                    }
+                    Decision::Deleted => Some(Why::Deleted),
+                    Decision::Cancelled => Some(Why::Cancelled),
+                    Decision::Held(language) => Some(Why::Held {
+                        language: *language,
+                    }),
+                    // Only the newest season's: earlier ones are read for other reasons, and
+                    // all of them are skipped.
+                    Decision::Skipped => {
+                        anchor
+                            .filter(|anchor| anchor.newest.0 == season)
+                            .map(|anchor| Why::Skipped {
+                                first: anchor.first,
+                            })
+                    }
+                    _ => None,
+                };
+                if let Some(why) = why {
+                    check.left_out.push(LeftOut { episode: key, why });
                 }
                 if !decision.queues() {
                     continue;
@@ -301,6 +347,16 @@ impl Core {
             check.error = Some(errors.join("; "));
         }
         check.summary = summary(&check);
+        tracing::info!(
+            "Auto-Sync {}: follows {}, newest downloaded {}{}, {} queued, {} waiting, {} left out",
+            title.title,
+            language.map_or("any language", language_name),
+            anchor.map_or_else(|| "none".to_owned(), |anchor| code(anchor.newest)),
+            if newest_gone { " (file gone)" } else { "" },
+            check.queued.len(),
+            check.waiting.len(),
+            check.left_out.len(),
+        );
         Ok(check)
     }
 

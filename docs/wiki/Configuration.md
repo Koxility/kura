@@ -70,7 +70,7 @@ Switch AniWorld or SerienStream off to hide them everywhere, including Auto-Sync
 ## Settings → Auto-Sync
 
 - **Enable Auto-Sync**: checks every series for new episodes once a download of it has started.
-- **Only new episodes**: on, only episodes after the newest downloaded one; off, missing earlier episodes are downloaded too.
+- **Only new episodes**: on, episodes after the first one downloaded of the newest season, and later seasons; off, missing earlier episodes are downloaded too.
 - **Schedule**: every N minutes (5 to 10080) or every day at a fixed time (in `TZ`).
 
 Each check reads every tracked series from the site and decides about each listed episode:
@@ -80,7 +80,8 @@ Each check reads every tracked series from the site and decides about each liste
 - **Waiting.** An episode that is not offered in that language yet is queued by a later check once it is. The Auto-Sync page lists it with the languages it is offered in.
 - **Failed downloads** are queued again on every check. Cancelled ones are left alone, and so is an episode deleted after it was downloaded in the series' language.
 - **Better language.** An episode on disk only in a language ranked lower (e.g. German Sub while the series follows German Dub) is downloaded again once the better language is out. When that download is done, the old file is deleted, with its `.nfo` and thumbnail (`-thumb.jpg` and the like), before Jellyfin is asked to scan, so Jellyfin reads the episode afresh.
-- **Only new episodes** counts from the newest episode downloaded in the series' language, also after its file was deleted, so watching and deleting does not stop a series.
+- **Only new episodes** counts from the episodes downloaded in the series' language, also after their files were deleted, so watching and deleting does not stop a series. In the newest season, everything after the first episode you have is wanted: an episode between two downloaded ones came out late (a dub out of order) and is downloaded once it is out. Only episodes before the first one you have of that season, and earlier seasons, count as passed over.
+- **Left out** in an opened card lists the listed episodes of the newest season that Auto-Sync leaves alone, and why: deleted after a download, cancelled, on disk in a language ranked lower whose better version is not out yet, or before the first episode you have of the season.
 
 A season page that lists no episodes, or that cannot be read twice in a row, makes the check fail instead of passing as "Nothing new"; the other seasons are still checked. The Auto-Sync page shows, per series, its language, the episodes on disk in that language, the newest episode the site lists, what the last check queued or waits for, and when it ran. This, and the time of the last run, is kept over a restart. **Sync now** on the Auto-Sync page runs a check at once; while a check is running, it waits for that one instead of starting a second.
 

@@ -9,6 +9,7 @@ import {
   settingsQuery,
   siteNames,
   type SyncStatus,
+  type LeftOut,
   type TitleRef,
   type TrackedTitle,
 } from "../api";
@@ -198,6 +199,45 @@ function Dot({ tone }: { tone: Tone }) {
   return <span className={`${styles.dot} ${styles[tone]}`} aria-hidden="true" />;
 }
 
+/** Why an episode is left alone, in words. */
+function why(left: LeftOut, title: TrackedTitle): string {
+  const language = title.language ? languageNames[title.language] : "its language";
+  switch (left.reason) {
+    case "deleted":
+      return `downloaded in ${language}, file deleted since`;
+    case "cancelled":
+      return "download cancelled";
+    case "held":
+      return `on disk in ${left.language ? languageNames[left.language] : "another language"}, replaced once ${language} is out`;
+    case "skipped":
+      return `before ${episodeCode(...left.first)}, the first you have of this season`;
+  }
+}
+
+/** Shown before "and N more". */
+const LEFT_OUT_SHOWN = 6;
+
+/** Listed episodes Auto-Sync leaves alone, one per line with the reason. */
+function LeftOutList({ title }: { title: TrackedTitle }) {
+  const leftOut = title.check?.left_out ?? [];
+  if (leftOut.length === 0) return null;
+  const more = leftOut.length - LEFT_OUT_SHOWN;
+  return (
+    <div className={styles.waiting}>
+      <div className={styles.label}>Left out</div>
+      <ul>
+        {leftOut.slice(0, LEFT_OUT_SHOWN).map((left) => (
+          <li key={left.episode.join("-")}>
+            <span className={ui.mono}>{episodeCode(...left.episode)}</span>
+            <span className={ui.muted}>{why(left, title)}</span>
+          </li>
+        ))}
+        {more > 0 && <li className={ui.muted}>and {more} more</li>}
+      </ul>
+    </div>
+  );
+}
+
 /** Episodes that wait for the title's language, one per line. */
 function WaitingList({ title }: { title: TrackedTitle }) {
   const waiting = title.check?.waiting ?? [];
@@ -310,6 +350,7 @@ function TitleCard(props: TitleProps) {
             <p className={`${ui.muted} ${styles.siteLine}`}>On {siteNames[title.site]}</p>
             <LastCheck title={title} />
             <WaitingList title={title} />
+            <LeftOutList title={title} />
             <div className={styles.detailActions}>
               <Link to={`/series/${title.site}/${title.slug}`} className={ui.button}>
                 Open title

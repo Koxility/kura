@@ -922,6 +922,15 @@ async fn auto_sync_queues_what_is_new_and_fills_gaps_only_when_asked() {
     let status = s.core.sync_status().unwrap();
     assert_eq!(status.titles.len(), 1);
     assert_eq!(status.titles[0].on_disk, 2);
+    // Episode 1 comes before the first one downloaded: left out, and the page says why.
+    let check = status.titles[0].check.as_ref().unwrap();
+    assert_eq!(
+        check.left_out,
+        [LeftOut {
+            episode: (1, 1),
+            why: Why::Skipped { first: (1, 2) }
+        }]
+    );
     assert_eq!(
         status.titles[0]
             .check
@@ -1744,4 +1753,62 @@ async fn new_episodes_come_after_the_newest_download_also_once_its_file_is_delet
     let jobs = states(&s.core, &[JobState::Done; 3]).await;
     assert!(!PathBuf::from(jobs[0].path.as_deref().unwrap()).exists());
     assert_eq!(s.tracked("lantern-road").on_disk, 2);
+}
+
+/// The Vermilion Mask: episodes 1 to 4 on disk in dub, a dub download of episode 6 on record
+/// whose file is gone, 5 to 8 only as a sub. Episode 5 was left out without a word, and once
+/// its dub came out it was still not queued: everything up to 6 counted as old.
+#[tokio::test]
+async fn an_episode_between_two_downloaded_ones_is_queued_once_its_dub_is_out() {
+    let links = vec![
+        link(DUB, "voe", "https://voe/dub"),
+        link(SUB, "voe", "https://voe/sub"),
+    ];
+    let s = setup(links, 1);
+    let both: &[Language] = &[DUB, SUB];
+    let sub: &[Language] = &[SUB];
+    let listing = |five: &'static [Language]| {
+        vec![
+            (1, both),
+            (2, both),
+            (3, both),
+            (4, both),
+            (5, five),
+            (6, sub),
+            (7, sub),
+            (8, sub),
+        ]
+    };
+    s.list("vermilion", 1, &listing(sub));
+    s.queue_in("vermilion", &[(1, 1), (1, 2), (1, 3), (1, 4), (1, 6)], DUB)
+        .await;
+    let jobs = states(&s.core, &[JobState::Done; 5]).await;
+    std::fs::remove_file(jobs[4].path.as_deref().unwrap()).unwrap();
+
+    assert_eq!(s.core.sync_once().await.unwrap(), 0);
+    let title = s.tracked("vermilion");
+    assert_eq!(title.on_disk, 4);
+    let check = title.check.unwrap();
+    let waiting: Vec<_> = check
+        .waiting
+        .iter()
+        .map(|waiting| waiting.episode)
+        .collect();
+    assert_eq!(waiting, [(1, 5), (1, 7), (1, 8)]);
+    assert_eq!(
+        check.left_out,
+        [LeftOut {
+            episode: (1, 6),
+            why: Why::Deleted
+        }]
+    );
+
+    // The dub of episode 5 is out.
+    s.list("vermilion", 1, &listing(both));
+    assert_eq!(s.core.sync_once().await.unwrap(), 1);
+    let jobs = states(&s.core, &[JobState::Done; 6]).await;
+    assert_eq!(jobs[5].episode.number, 5);
+    assert_eq!(jobs[5].language, Some(DUB));
+    assert_eq!(s.tracked("vermilion").on_disk, 5);
+    assert_eq!(s.core.sync_once().await.unwrap(), 0);
 }

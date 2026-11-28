@@ -21,9 +21,25 @@ pub(crate) struct Title<'a> {
     pub files: &'a [Found],
     /// The title's jobs; one per episode at most.
     pub jobs: &'a [&'a Job],
-    /// With `only_new`, episodes up to this one are not wanted.
-    pub anchor: Option<(u32, u32)>,
+    /// Where the title stands in its language; `None` while nothing finished.
+    pub anchor: Option<Anchor>,
     pub only_new: bool,
+}
+
+/// The newest episode a title has in its language, and the first it has of that season. With
+/// `only_new`, what comes after the first counts: a gap between two downloaded episodes is
+/// an episode that came out late (a dub out of order), not one somebody passed over.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Anchor {
+    pub newest: (u32, u32),
+    pub first: (u32, u32),
+}
+
+impl Anchor {
+    /// Whether "only new" wants this episode.
+    fn wants(&self, episode: (u32, u32)) -> bool {
+        episode > self.newest || (episode.0 == self.newest.0 && episode > self.first)
+    }
 }
 
 /// What becomes of one listed episode.
@@ -37,13 +53,14 @@ pub(crate) enum Decision {
     Cancelled,
     /// Downloaded in the title's language and deleted since: left alone.
     Deleted,
-    /// Only in a language the settings rank lower, and the title's language is not out yet.
-    Held,
+    /// Only in a language the settings rank lower (this one), and the title's language is
+    /// not out yet.
+    Held(Option<Language>),
     /// Only in a language the settings rank lower, and the title's language is out: download
     /// it, then delete these files.
     Upgrade(Vec<PathBuf>),
-    /// Not wanted: up to the newest downloaded episode with `only_new`, or nothing of the
-    /// title finished yet.
+    /// Not wanted: with `only_new`, before the first episode the title has of its newest
+    /// season or in an earlier season; or nothing of the title finished yet.
     Skipped,
     /// Wanted, but not offered in the title's language yet; these are.
     Waiting(Vec<Language>),
@@ -96,13 +113,9 @@ pub(crate) fn fits(language: Option<Language>, had: Option<Language>) -> bool {
     language.is_none() || had.is_none() || had == language
 }
 
-/// The newest episode the title has in its language: on disk, or downloaded and deleted
-/// since, so watching and deleting does not make old episodes new again.
-pub(crate) fn anchor(
-    language: Option<Language>,
-    files: &[Found],
-    jobs: &[&Job],
-) -> Option<(u32, u32)> {
+/// Where the title stands in its language, from what is on disk and from finished downloads
+/// whose files are gone, so watching and deleting does not make old episodes new again.
+pub(crate) fn anchor(language: Option<Language>, files: &[Found], jobs: &[&Job]) -> Option<Anchor> {
     let on_disk = files
         .iter()
         .filter(|file| fits(language, file.language))
@@ -111,7 +124,14 @@ pub(crate) fn anchor(
         .iter()
         .filter(|job| job.state == JobState::Done && fits(language, job.language))
         .map(|job| pair(job));
-    on_disk.chain(finished).max()
+    let had: Vec<(u32, u32)> = on_disk.chain(finished).collect();
+    let newest = had.iter().copied().max()?;
+    let first = had
+        .iter()
+        .copied()
+        .filter(|episode| episode.0 == newest.0)
+        .min()?;
+    Some(Anchor { newest, first })
 }
 
 /// Episodes on disk in the title's language, or in a file whose name tells none, sorted.
@@ -165,7 +185,7 @@ pub(crate) fn decide(episode: &Episode, title: &Title) -> Decision {
         });
         return match (better, offered) {
             (true, true) => Decision::Upgrade(files.iter().map(|file| file.path.clone()).collect()),
-            _ => Decision::Held,
+            _ => Decision::Held(files[0].language),
         };
     }
 
@@ -173,7 +193,7 @@ pub(crate) fn decide(episode: &Episode, title: &Title) -> Decision {
     let wanted = failed
         || title
             .anchor
-            .is_some_and(|newest| !title.only_new || key > newest);
+            .is_some_and(|anchor| !title.only_new || anchor.wants(key));
     if !wanted {
         Decision::Skipped
     } else if !offered {
@@ -263,7 +283,14 @@ mod tests {
         let files = [file(1, Some(Dub)), file(2, None), file(5, Some(Sub))];
         let deleted = job(3, JobState::Done, Some(Dub));
         let other = job(4, JobState::Done, Some(Sub));
-        assert_eq!(anchor(Some(Dub), &files, &[&deleted, &other]), Some((1, 3)));
+        let found = anchor(Some(Dub), &files, &[&deleted, &other]);
+        assert_eq!(
+            found,
+            Some(Anchor {
+                newest: (1, 3),
+                first: (1, 1)
+            })
+        );
         assert_eq!(anchor(Some(Dub), &[], &[]), None);
     }
 
@@ -273,7 +300,10 @@ mod tests {
             order: &ORDER,
             files,
             jobs,
-            anchor: Some((1, 2)),
+            anchor: Some(Anchor {
+                newest: (1, 2),
+                first: (1, 2),
+            }),
             only_new: true,
         };
         decide(episode, &title)
@@ -338,7 +368,10 @@ mod tests {
     #[test]
     fn a_worse_language_on_disk_is_replaced_once_the_better_one_is_out() {
         let sub = [file(1, Some(Sub))];
-        assert_eq!(decide_with(&listed(1, &[Sub]), &sub, &[]), Decision::Held);
+        assert_eq!(
+            decide_with(&listed(1, &[Sub]), &sub, &[]),
+            Decision::Held(Some(Sub))
+        );
         assert_eq!(
             decide_with(&listed(1, &[Dub, Sub]), &sub, &[]),
             Decision::Upgrade(vec![sub[0].path.clone()])
@@ -349,10 +382,16 @@ mod tests {
             order: &ORDER,
             files: &[file(1, Some(Language::English))],
             jobs: &[],
-            anchor: Some((1, 1)),
+            anchor: Some(Anchor {
+                newest: (1, 1),
+                first: (1, 1),
+            }),
             only_new: true,
         };
-        assert_eq!(decide(&listed(1, &[EnglishSub]), &title), Decision::Held);
+        assert_eq!(
+            decide(&listed(1, &[EnglishSub]), &title),
+            Decision::Held(Some(Language::English))
+        );
     }
 
     #[test]
@@ -373,5 +412,56 @@ mod tests {
             ..title
         };
         assert_eq!(decide(&listed(5, &[Dub]), &title), Decision::Retry);
+    }
+
+    /// The Vermilion Mask: episodes 1 to 4 on disk in dub and a dub download of episode 6 on
+    /// record. Episode 5 sits between them: it waits for its dub, and is new once it is out.
+    #[test]
+    fn a_gap_between_downloaded_episodes_is_wanted_with_only_new() {
+        let files: Vec<Found> = (1..=4).map(|number| file(number, Some(Dub))).collect();
+        let e6 = job(6, JobState::Done, Some(Dub));
+        let jobs = [&e6];
+        let found = anchor(Some(Dub), &files, &jobs);
+        assert_eq!(
+            found,
+            Some(Anchor {
+                newest: (1, 6),
+                first: (1, 1)
+            })
+        );
+        let title = Title {
+            language: Some(Dub),
+            order: &ORDER,
+            files: &files,
+            jobs: &jobs,
+            anchor: found,
+            only_new: true,
+        };
+        assert_eq!(
+            decide(&listed(5, &[Sub]), &title),
+            Decision::Waiting(vec![Sub])
+        );
+        assert_eq!(decide(&listed(5, &[Dub, Sub]), &title), Decision::New);
+        assert_eq!(decide(&listed(6, &[Sub]), &title), Decision::Deleted);
+        assert_eq!(
+            decide(&listed(7, &[Sub]), &title),
+            Decision::Waiting(vec![Sub])
+        );
+
+        // Started with episode 3: the two before it stay skipped, an earlier season too.
+        let title = Title {
+            files: &[],
+            anchor: Some(Anchor {
+                newest: (1, 6),
+                first: (1, 3),
+            }),
+            ..title
+        };
+        assert_eq!(decide(&listed(2, &[Dub]), &title), Decision::Skipped);
+        let earlier = Episode {
+            season: 0,
+            ..listed(9, &[Dub])
+        };
+        assert_eq!(decide(&earlier, &title), Decision::Skipped);
     }
 }
