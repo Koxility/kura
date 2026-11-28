@@ -275,43 +275,52 @@ export interface Request {
 /** `[season, episode]`. */
 export type EpisodePair = [number, number];
 
+/** What started an Auto-Sync check: a site's list of new episodes, or Sync now. */
+export type SyncTrigger = "feed" | "full";
+
 /** What the last Auto-Sync check of a title found. */
 export interface TitleCheck {
   checked_at: number;
+  trigger: SyncTrigger;
   /** Why the check failed, or which seasons could not be read. */
   error: string | null;
   /** The newest episode the site lists, in any language. */
   newest_listed: EpisodePair | null;
   queued: EpisodePair[];
-  retried: EpisodePair[];
+  /** Queued in a better language, replacing the file there. */
   replacing: EpisodePair[];
-  /** Wanted episodes not offered in the title's language yet, with the languages they are. */
+  /** Missing episodes not offered in a language the series may have yet. */
   waiting: { episode: EpisodePair; offered: Language[] }[];
-  /** Listed episodes of the newest season left alone, and why. */
-  left_out: LeftOut[];
   summary: string;
 }
 
-export type LeftOut = { episode: EpisodePair } & (
-  | { reason: "deleted" }
-  | { reason: "cancelled" }
-  | { reason: "held"; language: Language | null }
-  | { reason: "skipped"; first: EpisodePair }
-);
-
 export interface TrackedTitle extends TitleRef {
-  /** The language Auto-Sync follows for this title. */
-  language: Language | null;
-  /** Episodes in the libraries in that language, now. */
+  /** The languages its files are in, best first. */
+  languages: Language[];
+  /** Episodes in the libraries now, in any language. */
   on_disk: number;
   newest_on_disk: EpisodePair | null;
   check: TitleCheck | null;
+}
+
+/** What the last Auto-Sync run did. */
+export interface SyncReport {
+  at: number;
+  trigger: SyncTrigger;
+  /** Entries in the sites' lists of new episodes; null for Sync now. */
+  feed_entries: number | null;
+  checked: number;
+  queued: number;
+  failed: number;
+  /** A list of new episodes that could not be read. */
+  error: string | null;
 }
 
 export interface SyncStatus {
   enabled: boolean;
   last_run: number | null;
   next_run: number | null;
+  last_report: SyncReport | null;
   titles: TrackedTitle[];
 }
 
