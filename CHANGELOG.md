@@ -4,10 +4,22 @@ All notable changes to Kura are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.5.4] - 2026-11-28
+
+Auto-Sync now works like AniWorld-Downloader's: the sites' lists of new episodes say what to check, and only the library says what is there.
+
 ### Fixed
 
-- **Auto-Sync downloads an episode whose dub comes out after a later one.** With *Only new episodes*, everything up to the newest episode on record counted as old, also a gap in between: with episodes 1 to 4 on disk in German Dub and a German Dub download of episode 6 on record, episode 5 was never listed as waiting and never queued once its dub was out. Now, in the newest season, every episode after the first one you have is wanted, and only those before it (and earlier seasons) count as passed over.
-- **The Auto-Sync page says why an episode is left out.** An opened card lists the episodes of the newest season Auto-Sync leaves alone, each with its reason: deleted after a download, cancelled, on disk in a language ranked lower, or before the first episode you have of the season. Each check also writes one line per series to the log.
+- **Auto-Sync no longer holds back an episode because of the queue's history.** With episodes 1 to 4 of The Vermilion Mask on disk in German Dub and an old German Dub download of episode 6 on record whose file was gone, episode 5 was never queued, not even once its dub was out, and the page did not say why. Only the files in the library count now.
+- **A deleted episode comes again.** Kura used to keep episodes deleted after a download away for good. Now an episode that is not in the library is missing, whatever happened to it before; so is one whose download failed or was cancelled.
+
+### Changed
+
+- **The scheduled run follows the sites' lists of new episodes** (on AniWorld *Neue Episoden*, which reaches further back than the home page, on SerienStream its table). A tracked series in it gets every episode it is missing; with *Only new episodes*, the announced ones and those between them, since a release of many episodes often shows as its first and last one only. An announced episode its season's page does not show yet is taken as announced. Series not in the list are not read on the schedule, which spares the sites a page per series every run.
+- **Sync now checks every tracked series in full**, also those not in the list.
+- **A series may take every language it has, and better ones.** A series in German Sub keeps getting new episodes as German Sub and replaces them once the German Dub is out; a series in German Dub never gets German Sub. A series in both takes German Sub for an episode whose dub is not out yet and replaces it later.
+- **Only new episodes is off by default.** Settings saved before keep their choice.
+- The Auto-Sync page shows a chip per language a series has, whether its last check came from the list or from Sync now, and a line about the last run. The "Left out" list is gone with the rules behind it.
 
 ## [1.5.3] - 2026-11-27
 
@@ -378,7 +390,8 @@ First public release.
 
 - One binary with the web app built in, a JSON API under `/api/v1` and live events.
 
-[Unreleased]: https://github.com/Koxility/kura/compare/v1.5.3...HEAD
+[Unreleased]: https://github.com/Koxility/kura/compare/v1.5.4...HEAD
+[1.5.4]: https://github.com/Koxility/kura/compare/v1.5.3...v1.5.4
 [1.5.3]: https://github.com/Koxility/kura/compare/v1.5.2...v1.5.3
 [1.5.2]: https://github.com/Koxility/kura/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/Koxility/kura/compare/v1.5.0...v1.5.1

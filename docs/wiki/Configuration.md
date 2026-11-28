@@ -69,21 +69,21 @@ Switch AniWorld or SerienStream off to hide them everywhere, including Auto-Sync
 
 ## Settings → Auto-Sync
 
-- **Enable Auto-Sync**: checks every series for new episodes once a download of it has started.
-- **Only new episodes**: on, episodes after the first one downloaded of the newest season, and later seasons; off, missing earlier episodes are downloaded too.
+- **Enable Auto-Sync**: follows every series once a download of it has started.
+- **Only new episodes**: what a series gets when it shows up in a site's list of new episodes. Off (the default): every episode it is missing. On: only the announced episodes and those between them, since a release of many episodes often shows as its first and last one only (E01 and E12).
 - **Schedule**: every N minutes (5 to 10080) or every day at a fixed time (in `TZ`).
 
-Each check reads every tracked series from the site and decides about each listed episode:
+Auto-Sync works like [AniWorld-Downloader](https://github.com/phoenixthrush/AniWorld-Downloader)'s:
 
-- **Language.** A series follows one language: of the languages it already has, on disk or downloaded before, the one ranked highest in the language order under *Settings → Downloads*. The language comes from Kura's records or the file name, e.g. `German Dub`. New episodes are queued in exactly that language, with the provider, library and IMDb ID of the series' last download, into the folder the series already has.
-- **Already there.** An episode counts as downloaded only while a file of it is in the library in that language, or in a file whose name tells no language. Files Kura did not download count too. A download on record in another language, or one whose file is gone, does not count.
-- **Waiting.** An episode that is not offered in that language yet is queued by a later check once it is. The Auto-Sync page lists it with the languages it is offered in.
-- **Failed downloads** are queued again on every check. Cancelled ones are left alone, and so is an episode deleted after it was downloaded in the series' language.
-- **Better language.** An episode on disk only in a language ranked lower (e.g. German Sub while the series follows German Dub) is downloaded again once the better language is out. When that download is done, the old file is deleted, with its `.nfo` and thumbnail (`-thumb.jpg` and the like), before Jellyfin is asked to scan, so Jellyfin reads the episode afresh.
-- **Only new episodes** counts from the episodes downloaded in the series' language, also after their files were deleted, so watching and deleting does not stop a series. In the newest season, everything after the first episode you have is wanted: an episode between two downloaded ones came out late (a dub out of order) and is downloaded once it is out. Only episodes before the first one you have of that season, and earlier seasons, count as passed over.
-- **Left out** in an opened card lists the listed episodes of the newest season that Auto-Sync leaves alone, and why: deleted after a download, cancelled, on disk in a language ranked lower whose better version is not out yet, or before the first episode you have of the season.
+- **The list of new episodes says what to check.** On its schedule, Auto-Sync reads each site's list of new episodes (on AniWorld the page *Neue Episoden*, on SerienStream its table of new episodes). Only tracked series in it are checked; the others are left alone until they show up. An announced episode that its season's page does not show yet is taken as the list announced it.
+- **Sync now checks everything.** The button on the Auto-Sync page checks every tracked series in full, also those not in the list, for example after Auto-Sync was off for a while. While a run is going, it waits for that one instead of starting a second.
+- **Only the library says what is there.** An episode is there while a file with `S01E001` or similar in its name is in the series' folder, also one Kura did not download. A deleted episode, or one whose download failed or was cancelled, is missing and comes again.
+- **Languages.** A series may get the languages it already has on disk (from the file names, e.g. `German Dub`, or Kura's record of the download) and every language ranked higher in the order under *Settings → Downloads*. A series in German Sub keeps getting German Sub and takes German Dub once it is out; a series in German Dub never gets German Sub, its episodes wait for the dub. A missing episode comes in the best of those languages it is offered in, with the provider, library and IMDb ID of the series' last download, into the folder the series already has.
+- **A better language replaces a file.** An episode on disk only in a language ranked lower (German Sub, say, when the German Dub is out) is downloaded again. When that download is done, the old file is deleted with its `.nfo` and thumbnail (`-thumb.jpg` and the like), before Jellyfin is asked to scan, so Jellyfin reads the episode afresh.
 
-A season page that lists no episodes, or that cannot be read twice in a row, makes the check fail instead of passing as "Nothing new"; the other seasons are still checked. The Auto-Sync page shows, per series, its language, the episodes on disk in that language, the newest episode the site lists, what the last check queued or waits for, and when it ran. This, and the time of the last run, is kept over a restart. **Sync now** on the Auto-Sync page runs a check at once; while a check is running, it waits for that one instead of starting a second.
+Kura finds a series' folder through its downloads, its IMDb ID (`[imdbid-tt…]` in the folder name) or its name, not by the title in the list alone. A season page that lists no episodes, or that cannot be read twice in a row, makes the check fail instead of passing as "Nothing new"; the other seasons are still checked. A list of new episodes that cannot be read makes the run report it.
+
+The Auto-Sync page shows, per series, the languages it has, the episodes on disk, the newest episode the site lists, what its last check queued or replaced, which episodes wait for a language and which languages they are offered in, and whether the check came from the list or from Sync now. A line at the top tells what the last run did. All of it is kept over a restart.
 
 **Remove** next to a tracked title takes it off the list until a download of it starts again. Titles can be left out for good by searching under *Exclude titles* or with the checkbox on a title's page; *Include again* brings them back.
 
