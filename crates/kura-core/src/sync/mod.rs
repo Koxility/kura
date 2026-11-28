@@ -1,26 +1,34 @@
-//! Auto-Sync: queues new episodes of series that were downloaded before.
+//! Auto-Sync, after the way AniWorld-Downloader does it: the sites' lists of new episodes
+//! say which tracked series got something new, and only the libraries say what is there.
 //!
-//! Every run reads each tracked title from the site and decides about every listed episode
-//! (see [`reconcile`]): what is on disk in the title's language is there, anything else that
-//! is wanted and offered in that language is queued. What a check found is kept in the
-//! database, so the page shows it also after a restart.
+//! On its schedule, Auto-Sync reads each site's list of new episodes ([`Core::sync_feed`]).
+//! A tracked series that shows up in it gets every episode it is missing, or with "only new
+//! episodes" the ones the list announced and those between them, since a release of many
+//! episodes may show as its first and last one only. **Sync now** checks every tracked
+//! series in full ([`Core::sync_once`]).
+//!
+//! An episode is there while a file of it is in the library; a deleted one comes again. What
+//! is downloaded in which language, and when a better language replaces a file, is in
+//! [`reconcile`]. What each check found is kept in the database for the page.
 
 mod reconcile;
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     future::Future,
     sync::{Arc, MutexGuard, PoisonError},
     time::Duration,
 };
 
 use chrono::{Days, Local, NaiveTime};
-use kura_domain::{EpisodeId, Job, JobState, Language, Schedule, Settings, SiteId, TitleRef};
+use kura_domain::{
+    Episode, EpisodeId, Job, Language, NewEpisode, Schedule, Settings, SiteId, TitleRef,
+};
 use kura_store::{NewJob, StoreError};
-use reconcile::{Decision, Title};
+use reconcile::Decision;
 use serde::{Deserialize, Serialize};
 
-use crate::{Core, Result, auth::now, downloaded::Found, parse_time};
+use crate::{Core, Result, auth::now, downloaded::Found, naming::language_name, parse_time};
 
 /// The wait before a page that could not be read is asked for again. None in tests.
 const FETCH_PAUSE: Duration = Duration::from_secs(if cfg!(test) { 0 } else { 3 });
@@ -39,6 +47,8 @@ pub struct SyncStatus {
     pub enabled: bool,
     pub last_run: Option<i64>,
     pub next_run: Option<i64>,
+    /// What the last run did; `None` before the first.
+    pub last_report: Option<RunReport>,
     pub titles: Vec<TrackedTitle>,
 }
 
@@ -47,13 +57,25 @@ pub struct SyncStatus {
 pub struct TrackedTitle {
     #[serde(flatten)]
     pub title: TitleRef,
-    /// The language Auto-Sync follows for it; `None` while nothing tells one.
-    pub language: Option<Language>,
-    /// Episodes in the libraries in that language, or in files whose name tells none, now.
+    /// The languages its files are in, best first; without a file that tells one, the
+    /// language of its most recent download.
+    pub languages: Vec<Language>,
+    /// Episodes in the libraries now, in any language.
     pub on_disk: usize,
     pub newest_on_disk: Option<(u32, u32)>,
     /// What the last check found; `None` before the first.
     pub check: Option<TitleCheck>,
+}
+
+/// What started a check.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Trigger {
+    /// The series was in a site's list of new episodes.
+    #[default]
+    Feed,
+    /// Sync now: every series, in full.
+    Full,
 }
 
 /// What one check of a title found.
@@ -61,17 +83,16 @@ pub struct TrackedTitle {
 #[serde(default)]
 pub struct TitleCheck {
     pub checked_at: i64,
+    pub trigger: Trigger,
     /// Why the check failed, or which seasons could not be read.
     pub error: Option<String>,
     /// The newest episode the site lists, in any language, of the seasons checked.
     pub newest_listed: Option<(u32, u32)>,
     /// Episodes queued by this check, among them those below.
     pub queued: Vec<(u32, u32)>,
-    /// Failed downloads queued again.
-    pub retried: Vec<(u32, u32)>,
-    /// Episodes queued in the title's language that replace a file in another one.
+    /// Episodes queued in a better language, replacing the file they have.
     pub replacing: Vec<(u32, u32)>,
-    /// Wanted episodes the site does not offer in the title's language yet.
+    /// Missing episodes not offered in a language the series may have yet.
     pub waiting: Vec<Waiting>,
     /// One line for the page.
     pub summary: String,
@@ -84,6 +105,31 @@ pub struct Waiting {
     pub offered: Vec<Language>,
 }
 
+/// What one run did.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RunReport {
+    pub at: i64,
+    pub trigger: Trigger,
+    /// Entries in the sites' lists of new episodes; `None` for Sync now.
+    pub feed_entries: Option<usize>,
+    /// Series checked: those in the lists, or all for Sync now.
+    pub checked: usize,
+    pub queued: usize,
+    /// Checks that failed.
+    pub failed: usize,
+    /// Lists of new episodes that could not be read.
+    pub error: Option<String>,
+}
+
+/// Which episodes of a series a check looks at.
+enum Scope {
+    /// Every season.
+    Full,
+    /// Per season, the announced episodes and those between them.
+    Announced(BTreeMap<u32, (u32, u32)>),
+}
+
 impl Core {
     pub fn sync_status(&self) -> Result<SyncStatus> {
         let settings = self.store.settings()?;
@@ -93,16 +139,18 @@ impl Core {
         for title in tracked(&settings, &jobs) {
             let own: Vec<&Job> = of_title(&jobs, &title).collect();
             let files = self.title_files(&title, &own)?;
-            let language = language_of(&settings.languages, &files, &own);
-            let present = reconcile::present(language, &files);
+            let mut present: Vec<(u32, u32)> = files.iter().map(|file| file.episode).collect();
+            present.sort_unstable();
+            present.dedup();
             titles.push(TrackedTitle {
-                language,
+                languages: reconcile::held(&settings.languages, &files, last_language(&own)),
                 on_disk: present.len(),
                 newest_on_disk: present.last().copied(),
                 check: checks.remove(&(title.site, title.slug.clone())),
                 title,
             });
         }
+        let report = self.store.last_sync_report()?;
         Ok(SyncStatus {
             enabled: settings.auto_sync.enabled,
             last_run: self.store.last_sync_run()?,
@@ -110,14 +158,26 @@ impl Core {
                 .sync_state()
                 .next_run
                 .filter(|_| settings.auto_sync.enabled),
+            last_report: report.and_then(|json| serde_json::from_str(&json).ok()),
             titles,
         })
     }
 
-    /// Checks every tracked title once and returns how many episodes were queued. While a run
-    /// is under way, another one waits for it and returns its result instead of checking
-    /// everything a second time.
+    /// Sync now: checks every tracked series in full and returns how many episodes were
+    /// queued.
     pub async fn sync_once(&self) -> Result<usize> {
+        self.sync_run(Trigger::Full).await
+    }
+
+    /// The scheduled run: reads the sites' lists of new episodes and checks the tracked
+    /// series in them. Returns how many episodes were queued.
+    pub async fn sync_feed(&self) -> Result<usize> {
+        self.sync_run(Trigger::Feed).await
+    }
+
+    /// One run. While a run is under way, another one waits for it and returns its result
+    /// instead of checking everything a second time.
+    async fn sync_run(&self, trigger: Trigger) -> Result<usize> {
         let _run = match self.sync_lock.try_lock() {
             Ok(run) => run,
             Err(_) => {
@@ -129,135 +189,212 @@ impl Core {
         self.forget_scan();
         let settings = self.store.settings()?;
         let jobs = self.store.jobs()?;
+        let mut report = RunReport {
+            at: now(),
+            trigger,
+            ..RunReport::default()
+        };
         let titles = tracked(&settings, &jobs);
-        let (mut total, mut failed) = (0, 0);
-        for title in &titles {
-            let check = match self.sync_title(&settings, &jobs, title).await {
-                Ok(check) => check,
-                Err(err) => {
+        let work: Vec<(TitleRef, Scope, Vec<NewEpisode>)> = match trigger {
+            Trigger::Full => titles
+                .into_iter()
+                .map(|title| (title, Scope::Full, Vec::new()))
+                .collect(),
+            Trigger::Feed => self.feed_hits(&settings, titles, &mut report).await,
+        };
+        report.checked = work.len();
+        for (title, scope, announced) in work {
+            let check = self
+                .sync_title(&settings, &jobs, &title, &scope, &announced, trigger)
+                .await
+                .unwrap_or_else(|err| {
                     let error = err.to_string();
                     TitleCheck {
                         checked_at: now(),
+                        trigger,
                         summary: format!("Check failed: {error}"),
                         error: Some(error),
                         ..TitleCheck::default()
                     }
-                }
-            };
-            total += check.queued.len();
-            failed += usize::from(check.error.is_some());
+                });
+            report.queued += check.queued.len();
+            report.failed += usize::from(check.error.is_some());
             let json = serde_json::to_string(&check).map_err(StoreError::from)?;
             self.store
                 .save_sync_result(title.site, &title.slug, &json)?;
         }
-        self.store.set_last_sync_run(now())?;
-        self.sync_state().last_queued = total;
+        let json = serde_json::to_string(&report).map_err(StoreError::from)?;
+        self.store.set_last_sync_run(report.at, &json)?;
+        self.sync_state().last_queued = report.queued;
         tracing::info!(
-            "Auto-Sync checked {} titles: {total} episodes queued, {failed} checks failed",
-            titles.len()
+            "Auto-Sync ({}): {} series checked, {} episodes queued, {} checks failed{}",
+            match trigger {
+                Trigger::Feed => "new episodes",
+                Trigger::Full => "every series",
+            },
+            report.checked,
+            report.queued,
+            report.failed,
+            report
+                .error
+                .as_ref()
+                .map_or_else(String::new, |error| format!("; {error}")),
         );
         // A run the user started counts as the last run, so the schedule moves with it.
         self.sync_wake.notify_one();
-        if total > 0 {
+        if report.queued > 0 {
             self.changed();
         }
-        Ok(total)
+        Ok(report.queued)
     }
 
-    /// Checks one title: reads the seasons that can hold something to do and queues what
-    /// [`reconcile::decide`] asks for, in the title's language and with the other choices of
-    /// its most recent download.
+    /// The tracked series in the sites' lists of new episodes, with what to check of them and
+    /// what the lists announced. A list that cannot be read is noted in the report.
+    async fn feed_hits(
+        &self,
+        settings: &Settings,
+        titles: Vec<TitleRef>,
+        report: &mut RunReport,
+    ) -> Vec<(TitleRef, Scope, Vec<NewEpisode>)> {
+        let mut sites: Vec<SiteId> = titles.iter().map(|title| title.site).collect();
+        sites.sort_by_key(|site| site.as_str());
+        sites.dedup();
+        let mut announced: HashMap<(SiteId, String), Vec<NewEpisode>> = HashMap::new();
+        let mut entries = 0;
+        let mut errors = Vec::new();
+        for id in sites {
+            let feed = match self.site(id) {
+                Ok(site) => twice(|| site.feed()).await.map_err(Into::into),
+                Err(err) => Err(err),
+            };
+            match feed {
+                Ok(feed) => {
+                    entries += feed.len();
+                    // Films and specials are not followed.
+                    for entry in feed.into_iter().filter(|entry| entry.season > 0) {
+                        let key = (entry.site, entry.slug.clone());
+                        announced.entry(key).or_default().push(entry);
+                    }
+                }
+                Err(err) => errors.push(format!("{}: {err}", id.as_str())),
+            }
+        }
+        report.feed_entries = Some(entries);
+        if !errors.is_empty() {
+            report.error = Some(format!(
+                "could not read the new episodes of {}",
+                errors.join("; ")
+            ));
+        }
+        titles
+            .into_iter()
+            .filter_map(|title| {
+                let announced = announced.remove(&(title.site, title.slug.clone()))?;
+                let scope = if settings.auto_sync.only_new {
+                    let mut ranges: BTreeMap<u32, (u32, u32)> = BTreeMap::new();
+                    for entry in &announced {
+                        let range = ranges
+                            .entry(entry.season)
+                            .or_insert((entry.number, entry.number));
+                        range.0 = range.0.min(entry.number);
+                        range.1 = range.1.max(entry.number);
+                    }
+                    Scope::Announced(ranges)
+                } else {
+                    Scope::Full
+                };
+                Some((title, scope, announced))
+            })
+            .collect()
+    }
+
+    /// Checks one title: reads its seasons in `scope` and queues what [`reconcile::decide`]
+    /// asks for, with the other choices of its most recent download. An announced episode
+    /// that its season's page does not list yet is taken as the list announced it.
     async fn sync_title(
         &self,
         settings: &Settings,
         jobs: &[Job],
         title: &TitleRef,
+        scope: &Scope,
+        announced: &[NewEpisode],
+        trigger: Trigger,
     ) -> Result<TitleCheck> {
-        let only_new = settings.auto_sync.only_new;
+        let order = &settings.languages;
         let own: Vec<&Job> = of_title(jobs, title).collect();
         let mut check = TitleCheck {
             checked_at: now(),
+            trigger,
             ..TitleCheck::default()
         };
         let Some(last) = own.iter().max_by_key(|job| job.queued_at).copied() else {
             check.summary = summary(&check);
             return Ok(check);
         };
-        // Files in the library count too, also ones Kura did not download.
+        // Files in the library count, also ones Kura did not download; nothing else does.
         let files = self.title_files(title, &own)?;
-        let language = language_of(&settings.languages, &files, &own);
-        let anchor = reconcile::anchor(language, &files, &own);
-        // Seasons before the newest one only matter for a failed download or a file in
-        // another language.
-        let pending: Vec<u32> = own
-            .iter()
-            .filter(|job| job.state == JobState::Failed)
-            .map(|job| job.episode.season)
-            .chain(
-                files
-                    .iter()
-                    .filter(|file| !reconcile::fits(language, file.language))
-                    .map(|file| file.episode.0),
-            )
-            .collect();
-        let wanted = |season: u32| {
-            pending.contains(&season)
-                || anchor.is_some_and(|(newest, _)| !only_new || season >= newest)
-        };
-        if anchor.is_none() && pending.is_empty() {
-            // Nothing finished yet: the first download decides where to go on.
-            check.summary = summary(&check);
-            return Ok(check);
-        }
+        let held = reconcile::held(order, &files, last_language(&own));
+        let allowed = reconcile::allowed(order, &held);
 
         let site = self.site(title.site)?;
         let series = twice(|| site.series(&title.slug)).await?;
         // Season 0 holds films and specials, which nobody asked to follow.
-        let seasons: Vec<u32> = series
-            .seasons
-            .iter()
-            .copied()
-            .filter(|season| *season > 0 && wanted(*season))
-            .collect();
-        let context = Title {
-            language,
-            order: &settings.languages,
-            files: &files,
-            jobs: &own,
-            anchor,
-            only_new,
+        let mut seasons: Vec<u32> = match scope {
+            Scope::Full => series.seasons.clone(),
+            Scope::Announced(ranges) => ranges.keys().copied().collect(),
         };
+        seasons.extend(announced.iter().map(|entry| entry.season));
+        seasons.retain(|season| *season > 0);
+        seasons.sort_unstable();
+        seasons.dedup();
+        let in_scope = |season: u32, number: u32| match scope {
+            Scope::Full => true,
+            Scope::Announced(ranges) => ranges
+                .get(&season)
+                .is_some_and(|(first, last)| (*first..=*last).contains(&number)),
+        };
+
         let mut errors = Vec::new();
         let mut listed_any = false;
         for &season in &seasons {
-            let listed = match twice(|| site.episodes(&title.slug, season)).await {
+            let mut listed = match twice(|| site.episodes(&title.slug, season)).await {
                 Ok(listed) => listed,
                 Err(err) => {
                     errors.push(format!("season {season}: {err}"));
-                    continue;
+                    Vec::new()
                 }
             };
             listed_any |= !listed.is_empty();
-            for episode in &listed {
+            for extra in from_feed(announced, season) {
+                if !listed.iter().any(|episode| episode.number == extra.number) {
+                    listed.push(extra);
+                }
+            }
+            for episode in listed
+                .iter()
+                .filter(|episode| in_scope(season, episode.number))
+            {
                 let key = (season, episode.number);
                 check.newest_listed = check.newest_listed.max(Some(key));
-                let decision = reconcile::decide(episode, &context);
-                if let Decision::Waiting(offered) = &decision {
-                    check.waiting.push(Waiting {
-                        episode: key,
-                        offered: offered.clone(),
-                    });
-                }
-                if !decision.queues() {
-                    continue;
-                }
-                let replaces: Vec<String> = match &decision {
-                    Decision::Upgrade(files) => files
-                        .iter()
-                        .map(|file| file.to_string_lossy().into_owned())
-                        .collect(),
-                    _ => Vec::new(),
-                };
+                let (language, replaces) =
+                    match reconcile::decide(episode, &files, &own, order, &allowed) {
+                        Decision::New(language) => (language, Vec::new()),
+                        Decision::Upgrade(language, files) => (
+                            language,
+                            files
+                                .iter()
+                                .map(|file| file.to_string_lossy().into_owned())
+                                .collect(),
+                        ),
+                        Decision::Waiting(offered) => {
+                            check.waiting.push(Waiting {
+                                episode: key,
+                                offered,
+                            });
+                            continue;
+                        }
+                        Decision::OnDisk | Decision::InQueue => continue,
+                    };
                 let id = EpisodeId {
                     site: title.site,
                     slug: title.slug.clone(),
@@ -269,22 +406,19 @@ impl Core {
                     series_title: &series.summary.title,
                     user_id: None,
                     // Exactly this language: no fallback to another one in the settings.
-                    language,
+                    language: Some(language),
                     hoster: last.hoster.as_deref(),
                     dir: &last.dir,
                     imdb_id: last.imdb_id.as_deref(),
                     now: now(),
-                    // Only what `decide` asked for gets here: never an episode someone
-                    // deleted, but one on record in another language.
+                    // It is not on disk in this language, whatever the queue remembers.
                     replace_done: true,
                     replaces: &replaces,
                 };
                 if self.store.enqueue(&new)?.is_some() {
                     check.queued.push(key);
-                    match decision {
-                        Decision::Retry => check.retried.push(key),
-                        Decision::Upgrade(_) => check.replacing.push(key),
-                        _ => {}
+                    if !replaces.is_empty() {
+                        check.replacing.push(key);
                     }
                 }
             }
@@ -301,6 +435,21 @@ impl Core {
             check.error = Some(errors.join("; "));
         }
         check.summary = summary(&check);
+        tracing::info!(
+            "Auto-Sync {}: in {}, {} queued, {} replacing, {} waiting",
+            title.title,
+            if held.is_empty() {
+                "any language".to_owned()
+            } else {
+                held.iter()
+                    .map(|language| language_name(*language))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            },
+            check.queued.len(),
+            check.replacing.len(),
+            check.waiting.len(),
+        );
         Ok(check)
     }
 
@@ -344,7 +493,7 @@ impl Core {
             };
             tokio::select! {
                 () = due => {
-                    if let Err(err) = self.sync_once().await {
+                    if let Err(err) = self.sync_feed().await {
                         tracing::warn!("Auto-Sync run failed: {err}");
                     }
                 }
@@ -399,13 +548,39 @@ fn tracked(settings: &Settings, jobs: &[Job]) -> Vec<TitleRef> {
     titles
 }
 
-/// The language a title follows (see [`reconcile::title_language`]); with nothing that tells
-/// one, the language its most recent download was queued in.
-fn language_of(order: &[Language], files: &[Found], own: &[&Job]) -> Option<Language> {
-    reconcile::title_language(order, files, own).or_else(|| {
-        let last = own.iter().max_by_key(|job| job.queued_at);
-        last.and_then(|job| job.language)
-    })
+/// The language the title's most recent download was queued in.
+fn last_language(own: &[&Job]) -> Option<Language> {
+    let last = own.iter().max_by_key(|job| job.queued_at);
+    last.and_then(|job| job.language)
+}
+
+/// Episodes of a season the list of new episodes announced, with every language it named.
+fn from_feed(announced: &[NewEpisode], season: u32) -> Vec<Episode> {
+    let mut episodes: Vec<Episode> = Vec::new();
+    for entry in announced.iter().filter(|entry| entry.season == season) {
+        let index = match episodes
+            .iter()
+            .position(|episode| episode.number == entry.number)
+        {
+            Some(index) => index,
+            None => {
+                episodes.push(Episode {
+                    season,
+                    number: entry.number,
+                    title: String::new(),
+                    languages: Vec::new(),
+                });
+                episodes.len() - 1
+            }
+        };
+        let languages = &mut episodes[index].languages;
+        if let Some(language) = entry.language
+            && !languages.contains(&language)
+        {
+            languages.push(language);
+        }
+    }
+    episodes
 }
 
 /// Asks the site once more after a short wait when the first try fails.
@@ -456,9 +631,6 @@ fn summary(check: &TitleCheck) -> String {
     if !check.replacing.is_empty() {
         parts.push(format!("replacing {}", codes(&check.replacing)));
     }
-    if !check.retried.is_empty() {
-        parts.push(format!("tried again {}", codes(&check.retried)));
-    }
     if parts.is_empty() {
         "Nothing new".to_owned()
     } else {
@@ -492,6 +664,7 @@ fn next_run(schedule: &Schedule, last_run: Option<i64>, now: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use chrono::{DateTime, Timelike};
+    use kura_domain::JobState;
 
     use super::*;
 

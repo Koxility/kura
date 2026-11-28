@@ -8,6 +8,7 @@ import {
   languageNames,
   settingsQuery,
   siteNames,
+  type SyncReport,
   type SyncStatus,
   type TitleRef,
   type TrackedTitle,
@@ -67,8 +68,8 @@ export function AutoSyncPage() {
         <span className={ui.muted} role="status">
           {syncNow.isSuccess &&
             (syncNow.data.queued === 0
-              ? "Checked every title. Nothing new."
-              : `Checked every title. ${syncNow.data.queued} new ${
+              ? "Checked every series in full. Nothing missing."
+              : `Checked every series in full. ${syncNow.data.queued} ${
                   syncNow.data.queued === 1 ? "episode" : "episodes"
                 } queued.`)}
           {syncNow.isError && <span className={ui.bad}>{syncNow.error.message}</span>}
@@ -77,7 +78,11 @@ export function AutoSyncPage() {
           type="button"
           className={ui.primary}
           disabled={syncNow.isPending || tracked.length === 0}
-          title={tracked.length === 0 ? "Nothing is tracked yet" : undefined}
+          title={
+            tracked.length === 0
+              ? "Nothing is tracked yet"
+              : "Checks every series in full, also those not in the list of new episodes"
+          }
           onClick={() => syncNow.mutate()}
         >
           {syncNow.isPending ? "Syncing…" : "Sync now"}
@@ -97,6 +102,12 @@ export function AutoSyncPage() {
           <Link to="/settings/auto-sync" className={ui.muted}>
             Settings
           </Link>
+          {status.data.last_report && (
+            <>
+              <br />
+              <LastRun report={status.data.last_report} />
+            </>
+          )}
         </p>
       )}
       {(status.error ?? exclude.error ?? remove.error) && (
@@ -198,14 +209,32 @@ function Dot({ tone }: { tone: Tone }) {
   return <span className={`${styles.dot} ${styles[tone]}`} aria-hidden="true" />;
 }
 
+/** One line on what the last run did. */
+function LastRun({ report }: { report: SyncReport }) {
+  const episodes = `${report.queued} ${report.queued === 1 ? "episode" : "episodes"} queued`;
+  const failed = report.failed > 0 ? `, ${report.failed} failed` : "";
+  // "series" is the same in the plural.
+  const series = (count: number) => `${count} series`;
+  const text =
+    report.trigger === "feed"
+      ? `Last run: ${series(report.checked)} in the list of new episodes, ${episodes}${failed}.`
+      : `Last run (Sync now): ${series(report.checked)} checked in full, ${episodes}${failed}.`;
+  return (
+    <>
+      {text}
+      {report.error && <span className={ui.bad}> {report.error}.</span>}
+    </>
+  );
+}
+
 /** Episodes that wait for the title's language, one per line. */
 function WaitingList({ title }: { title: TrackedTitle }) {
   const waiting = title.check?.waiting ?? [];
   if (waiting.length === 0) return null;
-  const language = title.language ? languageNames[title.language] : "its language";
+  const languages = title.languages.map((language) => languageNames[language]).join(" or ");
   return (
     <div className={styles.waiting}>
-      <div className={styles.label}>Waiting for {language}</div>
+      <div className={styles.label}>Waiting for {languages || "a language"}</div>
       <ul>
         {waiting.map(({ episode, offered }) => (
           <li key={episode.join("-")}>
@@ -229,7 +258,10 @@ function LastCheck({ title }: { title: TrackedTitle }) {
   return (
     <div className={styles.status}>
       <p className={check.error ? ui.bad : undefined}>{check.summary}</p>
-      <p className={ui.muted}>Checked {formatTime(check.checked_at)}</p>
+      <p className={ui.muted}>
+        Checked {formatTime(check.checked_at)},{" "}
+        {check.trigger === "feed" ? "from the list of new episodes" : "by Sync now"}
+      </p>
     </div>
   );
 }
@@ -259,11 +291,11 @@ function RemoveButton({ title, removing, onRemove }: TitleProps) {
 function Chips({ title }: { title: TrackedTitle }) {
   return (
     <span className={styles.chips}>
-      {title.language && (
-        <span className={`${ui.tag} ${styles.chip}`}>
-          <Flag language={title.language} /> {languageNames[title.language]}
+      {title.languages.map((language) => (
+        <span key={language} className={`${ui.tag} ${styles.chip}`}>
+          <Flag language={language} /> {languageNames[language]}
         </span>
-      )}
+      ))}
       <span className={`${ui.tag} ${styles.chip}`}>
         {onDisk(title)}
         {title.newest_on_disk && ` · up to ${episodeCode(...title.newest_on_disk)}`}

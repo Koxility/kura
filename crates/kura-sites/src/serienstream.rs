@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use kura_domain::{Episode, EpisodeId, Genre, HosterLink, Language, Series, SeriesSummary, SiteId};
+use kura_domain::{
+    Episode, EpisodeId, Genre, HosterLink, Language, NewEpisode, Series, SeriesSummary, SiteId,
+};
 use scraper::{ElementRef, Html};
 
 use crate::{
@@ -47,6 +49,15 @@ impl Site for SerienStream {
     async fn latest(&self) -> Result<Vec<SeriesSummary>> {
         let html = get(&self.http, &format!("{BASE}/neue-episoden")).await?;
         Ok(parse_latest(&html))
+    }
+
+    async fn feed(&self) -> Result<Vec<NewEpisode>> {
+        let html = get(&self.http, &format!("{BASE}/neue-episoden")).await?;
+        let found = parse_feed(&html);
+        if found.is_empty() {
+            return Err(SiteError::Layout("new episodes"));
+        }
+        Ok(found)
     }
 
     async fn genres(&self) -> Result<Vec<Genre>> {
@@ -228,20 +239,77 @@ fn parse_episodes(season: u32, html: &str) -> Vec<Episode> {
                 title: first_text(row, ".episode-title-ger")
                     .or_else(|| first_text(row, ".episode-title-eng"))
                     .unwrap_or_default(),
-                languages: row
-                    .select(&sel("svg.watch-language"))
-                    .filter_map(|flag| {
-                        flag.value().classes().find_map(|class| match class {
-                            "svg-flag-german" => Some(Language::GermanDub),
-                            "svg-flag-english" => Some(Language::English),
-                            "svg-flag-english-german" => Some(Language::GermanSub),
-                            _ => None,
-                        })
-                    })
-                    .collect(),
+                languages: svg_languages(row),
             })
         })
         .collect()
+}
+
+/// The languages a row shows as flags.
+fn svg_languages(row: ElementRef) -> Vec<Language> {
+    row.select(&sel("svg.watch-language"))
+        .filter_map(|flag| {
+            flag.value().classes().find_map(|class| match class {
+                "svg-flag-german" => Some(Language::GermanDub),
+                "svg-flag-english" => Some(Language::English),
+                "svg-flag-english-german" => Some(Language::GermanSub),
+                _ => None,
+            })
+        })
+        .collect()
+}
+
+/// The table on "Neue Episoden": one row per episode, one entry per flag it shows, or one
+/// without a language when it shows none (the season list tells it then).
+fn parse_feed(html: &str) -> Vec<NewEpisode> {
+    let doc = Html::parse_document(html);
+    let mut found = Vec::new();
+    for row in doc.select(&sel("table.new-episodes-table tbody tr")) {
+        let Some(link) = row.select(&sel("a[href]")).next() else {
+            continue;
+        };
+        // `/serie/<slug>/staffel-1/episode-6`
+        let Some(path) = link
+            .value()
+            .attr("href")
+            .and_then(|href| href.strip_prefix(SERIES))
+        else {
+            continue;
+        };
+        let mut parts = path.split('/');
+        let Some(slug) = parts.next().and_then(|slug| check_slug(slug).ok()) else {
+            continue;
+        };
+        let season = match parts.next() {
+            Some("filme") => Some(0),
+            Some(season) => season.strip_prefix("staffel-").and_then(|n| n.parse().ok()),
+            None => None,
+        };
+        let number = parts
+            .next()
+            .and_then(|episode| episode.rsplit('-').next()?.parse().ok());
+        let (Some(season), Some(number)) = (season, number) else {
+            continue;
+        };
+        let languages = svg_languages(row);
+        let languages: Vec<Option<Language>> = if languages.is_empty() {
+            vec![None]
+        } else {
+            languages.into_iter().map(Some).collect()
+        };
+        for language in languages {
+            found.push(NewEpisode {
+                site: SiteId::SerienStream,
+                slug: slug.to_owned(),
+                title: text(link),
+                season,
+                number,
+                language,
+                released: first_text(row, "td span").unwrap_or_default(),
+            });
+        }
+    }
+    found
 }
 
 fn parse_links(html: &str) -> Vec<HosterLink> {
@@ -297,6 +365,32 @@ mod tests {
                 "https://serienstream.to/media/images/channel/desktop/glass-county-ccc?format=jpg"
             )
         );
+    }
+
+    #[test]
+    fn new_episodes_table_gives_every_episode() {
+        let found = parse_feed(include_str!("../fixtures/serienstream_new.html"));
+        let entries: Vec<_> = found
+            .iter()
+            .map(|entry| {
+                (
+                    entry.slug.as_str(),
+                    entry.season,
+                    entry.number,
+                    entry.language,
+                )
+            })
+            .collect();
+        assert_eq!(
+            entries,
+            [
+                ("glass-county", 1, 6, None),
+                ("north-pier", 2, 1, None),
+                ("glass-county", 1, 5, None),
+            ]
+        );
+        assert_eq!(found[0].title, "Glass County");
+        assert_eq!(found[0].released, "13.11.2026 00:04");
     }
 
     #[test]
