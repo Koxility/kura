@@ -63,6 +63,13 @@ pub trait Site: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// The site's full list of new episodes, which Auto-Sync follows: one entry per episode
+    /// and language, newest first. A release of many episodes may show as its first and last
+    /// one only. Empty for a site without such a list.
+    async fn feed(&self) -> Result<Vec<NewEpisode>> {
+        Ok(Vec::new())
+    }
+
     /// The days around today with the episodes announced for them. Empty for a site without
     /// a calendar.
     async fn calendar(&self) -> Result<Vec<CalendarDay>> {

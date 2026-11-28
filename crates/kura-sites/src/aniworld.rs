@@ -178,6 +178,15 @@ impl Site for AniWorld {
         Ok(found)
     }
 
+    async fn feed(&self) -> Result<Vec<NewEpisode>> {
+        let html = get(&self.http, &format!("{BASE}/neue-episoden")).await?;
+        let found = parse_new_episodes(&html);
+        if found.is_empty() {
+            return Err(SiteError::Layout("new episodes"));
+        }
+        Ok(found)
+    }
+
     async fn calendar(&self) -> Result<Vec<CalendarDay>> {
         let html = get(&self.http, &format!("{BASE}/animekalender")).await?;
         let days = parse_calendar(&html);
@@ -380,7 +389,8 @@ fn flag_language(src: &str) -> Option<Language> {
     .find_map(|(name, language)| src.contains(name).then_some(language))
 }
 
-/// The list "Die 50 neuesten Episoden" on the home page.
+/// The list "Die 50 neuesten Episoden" on the home page, and the page "Neue Episoden", which
+/// has the same rows and reaches further back.
 fn parse_new_episodes(html: &str) -> Vec<NewEpisode> {
     Html::parse_document(html)
         .select(&sel(".newEpisodeList .row"))
@@ -719,6 +729,49 @@ mod tests {
             (found[2].season, found[2].number, found[2].language),
             (0, 16, Some(Language::GermanSub))
         );
+    }
+
+    #[test]
+    fn new_episodes_page_gives_one_entry_per_episode_and_language() {
+        let found = parse_new_episodes(include_str!("../fixtures/aniworld_feed.html"));
+        let entries: Vec<_> = found
+            .iter()
+            .map(|entry| {
+                let at = (entry.slug.as_str(), entry.season, entry.number);
+                (at, entry.language, entry.released.as_str())
+            })
+            .collect();
+        assert_eq!(
+            entries,
+            [
+                (
+                    ("lantern-road", 1, 9),
+                    Some(Language::GermanDub),
+                    "28.11.2026"
+                ),
+                (
+                    ("lantern-road", 1, 9),
+                    Some(Language::GermanSub),
+                    "28.11.2026"
+                ),
+                (
+                    ("glass-harbor", 2, 12),
+                    Some(Language::GermanSub),
+                    "27.11.2026"
+                ),
+                (
+                    ("glass-harbor", 2, 1),
+                    Some(Language::GermanSub),
+                    "27.11.2026"
+                ),
+                (
+                    ("lantern-road", 0, 3),
+                    Some(Language::EnglishSub),
+                    "26.11.2026"
+                ),
+            ]
+        );
+        assert_eq!(found[2].title, "Glass Harbor: The Second Tide");
     }
 
     #[test]
